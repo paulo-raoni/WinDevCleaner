@@ -1,0 +1,56 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Logs, reports, outputs
+logs/
+reports/
+*.log
+*.tmp
+
+# Editor folders
+.vscode/
+.idea/
+*.swp
+
+# Jupyter Notebook checkpoints (se usar)
+.ipynb_checkpoints
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Teste/backup/aleatórios
+*.bak
+*.old
+*.orig
+*.test
+
+# PyInstaller
+dist/
+build/
+*.spec
+
+# VSCode workspace
+*.code-workspace
+
+# __init__ de testes
+test/__init__.py
+
+# PowerShell output
+*.ps1~
+
+# Outras sujeiras
+*.csv
+*.html

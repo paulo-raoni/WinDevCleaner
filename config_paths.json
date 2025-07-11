@@ -1,0 +1,21 @@
+{
+  "safe": [
+    "%USERPROFILE%\\AppData\\Local\\Temp\\*",
+    "%USERPROFILE%\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.*\\LocalCache\\pip\\cache\\*",
+    "%USERPROFILE%\\AppData\\Local\\TechSmith\\Camtasia Studio\\CrashDumps\\*",
+    "%USERPROFILE%\\AppData\\Local\\ms-playwright\\*\\*",
+    "%USERPROFILE%\\AppData\\Local\\Microsoft\\Edge\\User Data\\*\\Cache\\*",
+    "%USERPROFILE%\\AppData\\Local\\CrashDumps\\*"
+  ],
+  "deep": [
+    "%USERPROFILE%\\AppData\\Local\\uv\\cache\\*",
+    "%USERPROFILE%\\AppData\\Local\\Programs\\Opera\\*",
+    "%USERPROFILE%\\AppData\\Local\\slobs-client-updater\\*",
+    "%USERPROFILE%\\AppData\\Local\\tiktok live studio-updater\\*",
+    "%USERPROFILE%\\AppData\\Local\\Discord\\*"
+  ],
+  "nuclear": [
+    "%USERPROFILE%\\AppData\\Local\\Programs\\Microsoft VS Code\\*",
+    "%USERPROFILE%\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.*\\LocalCache\\local-packages\\*"
+  ]
+}
