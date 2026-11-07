@@ -344,7 +344,7 @@ pub fn listen(
 ) -> io::Result<std::thread::JoinHandle<()>> {
     let name = pipe_name()?;
     let first = create_instance(&name, true)?;
-    Ok(std::thread::Builder::new().name("agent-link".into()).spawn(move || {
+    std::thread::Builder::new().name("agent-link".into()).spawn(move || {
         let mut next = Some(first);
         loop {
             let instance = match next.take() {
@@ -370,6 +370,6 @@ pub fn listen(
                 Err(_) => std::thread::sleep(Duration::from_millis(200)),
             }
         }
-    })?)
+    })
 }
 

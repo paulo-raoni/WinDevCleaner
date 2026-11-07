@@ -408,8 +408,8 @@ impl ScanReport {
     /// Finds the node of a folder by its full path (case-insensitive), if it was scanned.
     pub fn find_dir(&self, path: &str) -> Option<u32> {
         let want = normalize(path);
-        for (ri, r) in self.roots.iter().enumerate() {
-            let _ = ri;
+        let children = self.children_of_lookup();
+        for r in &self.roots {
             let Some(root) = r.node else { continue };
             let root_path = normalize(&r.path);
             if want == root_path {
@@ -421,16 +421,12 @@ impl ScanReport {
                 continue;
             }
             let mut cur = root;
-            let children = self.children_of_lookup();
             for part in rest.split('\\').filter(|s| !s.is_empty()) {
                 let next = children
                     .get(&cur)
                     .and_then(|list| list.iter().find(|&&c| self.dirs[c as usize].name.eq_ignore_ascii_case(part)))
                     .copied();
-                match next {
-                    Some(n) => cur = n,
-                    None => return None,
-                }
+                cur = next?;
             }
             return Some(cur);
         }

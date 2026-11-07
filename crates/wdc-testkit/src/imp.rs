@@ -1,3 +1,6 @@
+// Handles are opaque kernel object references passed to Windows, never dereferenced here.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};

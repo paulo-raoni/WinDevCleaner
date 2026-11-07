@@ -204,7 +204,7 @@ fn unreadable_folders_and_locked_files_are_reported_and_the_scan_goes_on() {
     let base = fresh_dir("denied");
     let denied = base.join("denied");
     std::fs::create_dir_all(&denied).unwrap();
-    write_file(&denied.join("secret.bin"), 1 * MIB);
+    write_file(&denied.join("secret.bin"), MIB);
     let locked_path = base.join("locked.bin");
     write_file(&locked_path, 70 * MIB);
     let truth = facts_by_handle(&locked_path);
@@ -230,7 +230,7 @@ fn long_and_unicode_paths_are_measured() {
     std::fs::create_dir_all(&deep).unwrap();
     assert!(deep.as_os_str().len() > 300);
     let f = deep.join("arquivo-ü.bin");
-    write_file(&f, 1 * MIB);
+    write_file(&f, MIB);
     let truth = facts_by_handle(&f);
 
     let r = scan_roots(&[&base]);
