@@ -38,8 +38,13 @@ use crate::win::{current_user_sid, last_error, token_user_sid, wide, OwnedHandle
 /// The pipe name for the current user: `\\.\pipe\WinDevCleaner-<SID>`. `WDC_PIPE_SUFFIX`
 /// appends a suffix, so tests can run their own app instance without touching a real one.
 pub fn pipe_name() -> io::Result<String> {
+    pipe_name_with_suffix(&std::env::var("WDC_PIPE_SUFFIX").unwrap_or_default())
+}
+
+/// The pipe name for the current user with an explicit suffix.
+pub fn pipe_name_with_suffix(suffix: &str) -> io::Result<String> {
     let sid = current_user_sid()?;
-    let suffix = std::env::var("WDC_PIPE_SUFFIX").unwrap_or_default();
+    let suffix: String = suffix.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
     Ok(format!(r"\\.\pipe\WinDevCleaner-{sid}{suffix}"))
 }
 
