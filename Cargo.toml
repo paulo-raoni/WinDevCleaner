@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wdc-core",
+    "crates/wdc-testkit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/paulo-raoni/WinDevCleaner"
+rust-version = "1.85"
+
+[workspace.dependencies]
+wdc-core = { path = "crates/wdc-core" }
+wdc-testkit = { path = "crates/wdc-testkit" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ruzstd = "0.9"
+windows-sys = "0.61"
+# The MCP SDK moved from 0.x to 3.x in 20 months; the version is pinned (plan, section 6.2).
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "io-std", "sync"] }
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "default_fonts", "wgpu_no_default_features"] }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+# Release code without link-time optimisation: used by the guard (mutation) check, which
+# rebuilds once per guarded line and needs quick incremental builds.
+[profile.ci-test]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+strip = false
+panic = "unwind"
