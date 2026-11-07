@@ -5,6 +5,7 @@ members = [
     "crates/wdc-cli",
     "crates/wdc-app",
     "crates/wdc-testkit",
+    "tools/wdc-bench",
 ]
 
 [workspace.package]

@@ -3237,6 +3237,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wdc-bench"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wdc-core",
+ "wdc-testkit",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "wdc-cli"
 version = "0.1.0"
 dependencies = [
