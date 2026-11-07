@@ -1,0 +1,148 @@
+name: windows
+
+# Everything heavy runs here, on GitHub's free windows-latest runner (the repository is
+# public), never on the owner's laptop (plan, section 8).
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  build-and-test:
+    name: build, fixtures, MSI
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Build both executables (release)
+        shell: pwsh
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          cargo build --release --locked --workspace --bins
+          "Release build: $([int]$sw.Elapsed.TotalSeconds) s" | Tee-Object -FilePath build-time.txt
+          Get-Item target\release\wdc.exe, target\release\WinDevCleaner.exe | Format-Table Name, Length
+      - name: Unit and fixture tests (hard links, links, sparse, compressed, offline, pipe, MCP)
+        run: cargo test --release --locked --workspace -- --nocapture
+      - name: Second local user for the pipe test
+        shell: pwsh
+        run: |
+          $pw = 'Wdc!' + [guid]::NewGuid().ToString('N').Substring(0, 20) + 'a1'
+          Write-Output "::add-mask::$pw"
+          $sec = ConvertTo-SecureString $pw -AsPlainText -Force
+          New-LocalUser -Name 'wdc-other' -Password $sec -PasswordNeverExpires -AccountNeverExpires | Out-Null
+          "WDC_OTHER_USER=wdc-other" >> $env:GITHUB_ENV
+          "WDC_OTHER_PASSWORD=$pw" >> $env:GITHUB_ENV
+      - name: The pipe refuses another user
+        run: cargo test --release --locked -p wdc-core --test pipe -- --ignored --exact another_user_cannot_open_the_pipe --nocapture
+      - name: An MCP client drives a scan and the app mirrors it
+        run: cargo test --release --locked -p wdc-app --test mcp_mirror -- --ignored --nocapture
+      - name: 1,000,000 files under the limits, in background mode
+        env:
+          WDC_REPORT_DIR: ${{ github.workspace }}\ci-out
+          WDC_MILLION_ROOT: ${{ runner.temp }}\wdc-million\tree
+        run: cargo test --release --locked -p wdc-cli --test million -- --ignored --nocapture
+      - name: Build the MSI (WiX v5)
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          "WDC_VERSION=$version" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force ci-out | Out-Null
+          wix build installer\WinDevCleaner.wxs -arch x64 -d Version=$version -d BinDir=target\release -o ci-out\WinDevCleaner.msi
+      - name: Install, run and uninstall the MSI
+        shell: pwsh
+        run: ci\msi-check.ps1 -Msi ci-out\WinDevCleaner.msi -Version $env:WDC_VERSION
+      - name: Collect artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-out | Out-Null
+          Copy-Item target\release\wdc.exe, target\release\WinDevCleaner.exe ci-out -ErrorAction SilentlyContinue
+          Copy-Item build-time.txt ci-out -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windevcleaner-slice-1
+          path: ci-out
+
+  budget:
+    name: budget check (plan 6.4)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Build (release, from scratch, timed)
+        shell: pwsh
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          cargo build --release --locked --workspace --bins
+          "BUILD_SECONDS=$([int]$sw.Elapsed.TotalSeconds)" >> $env:GITHUB_ENV
+      - name: Run the budget check
+        shell: pwsh
+        run: |
+          target\release\wdc-bench.exe --wdc target\release\wdc.exe --app target\release\WinDevCleaner.exe `
+            --vhd "$env:RUNNER_TEMP\wdc-bench.vhdx" --letter W --out ci-out --build-seconds $env:BUILD_SECONDS
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: if (Test-Path ci-out\budget.md) { Get-Content ci-out\budget.md | Out-File -Append $env:GITHUB_STEP_SUMMARY }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: budget-report
+          path: ci-out
+
+  guard-check:
+    name: guard check (each test fails without its guarding line)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-test
+      - name: Second local user for the pipe test
+        shell: pwsh
+        run: |
+          $pw = 'Wdc!' + [guid]::NewGuid().ToString('N').Substring(0, 20) + 'a1'
+          Write-Output "::add-mask::$pw"
+          $sec = ConvertTo-SecureString $pw -AsPlainText -Force
+          New-LocalUser -Name 'wdc-other' -Password $sec -PasswordNeverExpires -AccountNeverExpires | Out-Null
+          "WDC_OTHER_USER=wdc-other" >> $env:GITHUB_ENV
+          "WDC_OTHER_PASSWORD=$pw" >> $env:GITHUB_ENV
+      - name: Remove each guard, rebuild, require its tests to fail
+        shell: bash
+        env:
+          WDC_MILLION_ROOT: ${{ runner.temp }}\wdc-million\tree
+        run: ci/guard-check.sh
+      - name: Summary
+        if: always()
+        shell: bash
+        run: if [ -f ci-out/guard-check.md ]; then cat ci-out/guard-check.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guard-check
+          path: ci-out
