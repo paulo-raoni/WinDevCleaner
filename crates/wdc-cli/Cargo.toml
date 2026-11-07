@@ -1,0 +1,23 @@
+[package]
+name = "wdc-cli"
+description = "wdc.exe: WinDevCleaner's headless command line and MCP server."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "wdc"
+path = "src/main.rs"
+
+[dependencies]
+wdc-core.workspace = true
+serde_json.workspace = true
+rmcp.workspace = true
+tokio.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[dev-dependencies]
+wdc-testkit.workspace = true

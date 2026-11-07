@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/wdc-core",
+    "crates/wdc-cli",
     "crates/wdc-testkit",
 ]
 
