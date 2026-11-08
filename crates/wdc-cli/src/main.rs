@@ -45,6 +45,7 @@ fn main() -> ExitCode {
         }
         Some("scan") => scan_command(&rest[1..], lang),
         Some("diff") => diff_command(&rest[1..], lang),
+        Some("explain") => explain_command(&rest[1..], lang),
         Some("mcp") => {
             let show = match rest[1..].iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
                 [] => false,
@@ -217,6 +218,12 @@ fn print_human(lang: Lang, args: &ScanArgs, report: &wdc_core::scan::ScanReport,
     if t.errors > 0 {
         println!("{}", lang.fmt(Msg::CliErrors, &[("n", &n(t.errors))]));
     }
+    if let Some(list) = summary.get("unknown_large").and_then(|v| v.as_array()).filter(|l| !l.is_empty()) {
+        println!("\n{}", lang.t(Msg::CliUnknownLarge));
+        for d in list {
+            println!("  {:>10}  {}", fmt::bytes(d["bytes_on_disk"].as_u64().unwrap_or(0)), d["path"].as_str().unwrap_or_default());
+        }
+    }
     if let Some(items) = summary.get("system_items").and_then(|v| v.as_array()) {
         println!("\n{}", lang.t(Msg::CliSystemItems));
         print_system_items(lang, items);
@@ -355,7 +362,12 @@ fn print_diff(lang: Lang, d: &wdc_core::diff::Diff) {
         println!("{}", lang.fmt(Msg::CliDiffNone, &[("min", &fmt::bytes(d.min_bytes))]));
     }
     for c in &d.dirs {
-        println!("  {:>11}  {:<9} {}", signed(c.delta_bytes), change_text(lang, c.change), c.path);
+        let tag = match (&c.rule, c.unknown) {
+            (Some(r), _) => format!("  [{r}]"),
+            (None, true) => format!("  [{}]", lang.t(Msg::DiffUnknownTag)),
+            _ => String::new(),
+        };
+        println!("  {:>11}  {:<9} {}{tag}", signed(c.delta_bytes), change_text(lang, c.change), c.path);
     }
     if d.more > 0 {
         println!("{}", lang.fmt(Msg::CliDiffMore, &[("n", &d.more.to_string())]));
@@ -364,6 +376,102 @@ fn print_diff(lang: Lang, d: &wdc_core::diff::Diff) {
         println!("\n{}", lang.t(Msg::CliDiffFiles));
         for f in &d.files {
             println!("  {:>11}  {:<9} {}", signed(f.delta_bytes), change_text(lang, f.change), f.path);
+        }
+    }
+}
+
+fn explain_command(args: &[String], lang: Lang) -> ExitCode {
+    let mut json = false;
+    let mut path: Option<&str> = None;
+    for a in args {
+        match a.as_str() {
+            "--json" => json = true,
+            other if other.starts_with("--") => {
+                eprintln!("{}", lang.fmt(Msg::CliUnknownCommand, &[("arg", other)]));
+                return ExitCode::from(1);
+            }
+            other => path = Some(other),
+        }
+    }
+    let Some(path) = path else {
+        eprintln!("{}", lang.fmt(Msg::CliBadValue, &[("option", "PATH"), ("value", "")]));
+        return ExitCode::from(1);
+    };
+    let e = wdc_core::tools::run_explain(path, &wdc_core::scope::data_dir());
+    if json {
+        println!("{}", serde_json::to_string_pretty(&e).unwrap());
+    } else {
+        print_explanation(lang, &e);
+    }
+    ExitCode::SUCCESS
+}
+
+/// The human form of an explanation, shared wording with the app.
+pub fn print_explanation(lang: Lang, e: &wdc_core::explain::Explanation) {
+    let kind = lang.t(match e.kind {
+        "folder" => Msg::KindFolder,
+        "file" => Msg::KindFile,
+        "link" => Msg::KindLink,
+        _ => Msg::KindMissing,
+    });
+    println!("{}", lang.fmt(Msg::ExplainItem, &[("item", &e.item), ("kind", kind)]));
+    if wdc_core::rules::canon(&e.item).to_lowercase() != wdc_core::rules::canon(&e.path).to_lowercase() {
+        println!("  {}", lang.fmt(Msg::ExplainInside, &[("path", &e.path)]));
+    }
+    if e.exists {
+        println!(
+            "  {}",
+            lang.fmt(Msg::ExplainSize, &[("size", &fmt::bytes(e.bytes_on_disk)), ("files", &fmt::count(e.files))])
+        );
+        println!("  {}", lang.fmt(Msg::ExplainFreed, &[("size", &fmt::bytes(e.expected_freed_bytes))]));
+    }
+    for h in &e.hard_links {
+        println!(
+            "  {}",
+            lang.fmt(Msg::ExplainLinked, &[("size", &fmt::bytes(h.bytes_on_disk)), ("n", &h.links.to_string())])
+        );
+        for n in &h.names {
+            let out = if h.names_outside.contains(n) { format!("  {}", lang.t(Msg::ExplainOutside)) } else { String::new() };
+            println!("      {n}{out}");
+        }
+    }
+    match &e.rule {
+        None => println!("  {}", lang.t(Msg::ExplainUnknown)),
+        Some(r) => {
+            let full = &r.full;
+            println!(
+                "  {}",
+                lang.fmt(
+                    Msg::ExplainRule,
+                    &[("title", full.title(lang)), ("class", r.class.text(lang)), ("action", r.action.text(lang))]
+                )
+            );
+            if let wdc_core::rules::Origin::Local(file) = &r.origin {
+                println!("  {}", lang.fmt(Msg::ExplainLocalRuleNote, &[("file", file)]));
+            }
+            println!("  {}", lang.fmt(Msg::ExplainEvidence, &[("text", full.evidence(lang))]));
+            println!("  {}", lang.fmt(Msg::ExplainSource, &[("text", &full.source)]));
+            println!("  {}", lang.fmt(Msg::ExplainCost, &[("text", full.cost(lang))]));
+            if let Some(how) = full.instructions(lang) {
+                println!("  {}", lang.fmt(Msg::ExplainHow, &[("text", how)]));
+            }
+        }
+    }
+    if !e.match_conditions.is_empty() || !e.require_conditions.is_empty() {
+        println!("  {}", lang.t(Msg::ExplainConditions));
+        for c in e.match_conditions.iter().chain(&e.require_conditions) {
+            println!("    [{}] {}", if c.passed { "x" } else { " " }, c.found.text(lang));
+        }
+    }
+    if let Some(root) = &e.act_scope.allowed_root {
+        println!("  {}", lang.fmt(Msg::ExplainScope, &[("root", root)]));
+    }
+    if e.actionable {
+        println!("  {}", lang.t(Msg::ExplainActionable));
+    } else {
+        println!("  {}", lang.t(Msg::ExplainNotActionable));
+        for w in &e.why_not {
+            println!("    - {}", w.text(lang));
         }
     }
 }
