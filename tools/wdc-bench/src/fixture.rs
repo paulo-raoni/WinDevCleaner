@@ -169,11 +169,11 @@ pub fn generate(base: &Path) -> (Fixture, PathBuf, PathBuf) {
     // A path over 260 characters, with Unicode names.
     let mut long = special.clone();
     for i in 0..10 {
-        long = long.join(format!("pasta-número-{i:02}-ação-日本語-ελληνικά"));
+        long = long.join(format!("folder-number-{i:02}-café-日本語-ελληνικά"));
         e.dirs += 1;
     }
     std::fs::create_dir_all(&long).unwrap();
-    let deep = long.join("arquivo-ü.bin");
+    let deep = long.join("file-naïve-ü.bin");
     write_file(&deep, 100_000);
     facts.long_path_chars = deep.as_os_str().len();
     count_file(&mut e, &deep);

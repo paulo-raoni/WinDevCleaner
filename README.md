@@ -79,6 +79,12 @@ Workspace:
 | `tools/wdc-bench` | the budget check (not shipped) |
 | `installer` | the WiX v5 MSI definition |
 
+## Languages
+
+The project (code, documentation, commits) is in English. The app and the command line speak
+English and Brazilian Portuguese; the pt-BR texts live only in the message catalogue
+(`crates/wdc-core/src/i18n.rs`).
+
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).

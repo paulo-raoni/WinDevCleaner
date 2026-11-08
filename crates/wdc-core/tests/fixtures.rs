@@ -228,11 +228,11 @@ fn long_and_unicode_paths_are_measured() {
     let base = fresh_dir("long");
     let mut deep: PathBuf = base.clone();
     for i in 0..12 {
-        deep = deep.join(format!("pasta-com-nome-longo-número-{i:02}-ação-日本語"));
+        deep = deep.join(format!("folder-with-a-long-name-number-{i:02}-café-日本語"));
     }
     std::fs::create_dir_all(&deep).unwrap();
     assert!(deep.as_os_str().len() > 300);
-    let f = deep.join("arquivo-ü.bin");
+    let f = deep.join("file-naïve-ü.bin");
     write_file(&f, MIB);
     let truth = facts_by_handle(&f);
 
@@ -240,6 +240,6 @@ fn long_and_unicode_paths_are_measured() {
     assert_eq!(r.totals.errors, 0, "{:?}", r.errors);
     assert_eq!(r.totals.bytes_on_disk, truth.allocation);
     assert_eq!(r.totals.dirs, 13);
-    assert!(r.top_files[0].path.ends_with("arquivo-ü.bin"));
+    assert!(r.top_files[0].path.ends_with("file-naïve-ü.bin"));
     remove_tree(&base);
 }
