@@ -1,0 +1,30 @@
+[package]
+name = "wdc-app"
+description = "WinDevCleaner.exe: the desktop app (egui), which agents drive through `wdc mcp`."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "WinDevCleaner"
+path = "src/main.rs"
+
+[dependencies]
+wdc-core.workspace = true
+serde_json.workspace = true
+eframe.workspace = true
+
+# Direct3D 12 only on Windows (no OpenGL or Vulkan loaders): the lightest backend, and the one
+# Windows' software renderer (WARP) also provides on machines without a GPU, such as CI.
+[target.'cfg(windows)'.dependencies]
+wgpu = { workspace = true }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[target.'cfg(not(windows))'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"] }
+
+[dev-dependencies]
+wdc-testkit.workspace = true

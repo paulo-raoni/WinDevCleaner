@@ -1,161 +1,90 @@
+# WinDevCleaner
 
-# 🧹 WinDevCleaner
+Finds where the disk space of a Windows developer machine went, so that an AI agent can
+investigate and propose, and a human approves before anything is touched.
 
-**Limpe, organize e destrua lixos digitais do seu Windows como um verdadeiro dev raiz. Modular, seguro, visual e com opções para quem gosta de viver perigosamente.**
+The tool is being rebuilt in Rust, one vertical slice at a time, following
+[the rebuild plan](docs/rebuild-plan.md). **This version is slice 1, "Where is my space?": it
+is read-only.** It never changes anything on disk outside its own data folder.
 
----
+## What it does now
 
-## 🚀 O que é o WinDevCleaner?
+- `wdc scan` measures the read scope (your user profile without the personal folders, plus
+  `ProgramData`) or the folders you name, gently: Windows background mode (low CPU, I/O and
+  memory priority), one thread, optional `--throttle`.
+- Sizes are **sizes on disk**: a file with several names (hard links) is counted once, also
+  when its other name is outside the scanned folders; junctions and symbolic links are recorded
+  and never followed; sparse and compressed files count what is allocated; cloud files that are
+  not stored locally (OneDrive) count 0 and are never downloaded.
+- Each scan saves a compressed snapshot in `%LOCALAPPDATA%\WinDevCleaner\snapshots` (the last
+  10 are kept), for the "what grew" view of slice 2.
+- `WinDevCleaner.exe` shows the tree of sizes. When an AI agent connects through `wdc mcp`, the
+  window shows "Agent connected: <name>", every call live in the activity panel, and "Pause
+  agent" / "Disconnect agent" buttons.
+- English and Brazilian Portuguese (`--lang en|pt-BR`, or the Windows display language).
 
-O **WinDevCleaner** é o seu aliado para eliminar arquivos, caches, programas esquecidos e pastas órfãs do Windows, indo de uma limpeza leve (safe) até modos de destruição nuclear. Com menu interativo, logs detalhados, dry-run seguro e integração modular para plugins futuros.
+The old Python tool is kept in `legacy/` as `.txt` files, for reference only, and will be
+deleted at the end of the rebuild.
 
-- **Limpeza padrão ou extrema (Safe, Deep, Nuclear, Manual/Rankeada)**
-- **Logs e relatórios em TXT, CSV e HTML**
-- **Modo dry-run (simula), modo real-run (faz mesmo)**
-- **Análise manual para grandes pastas (ex: Programs, pacotes Python)**
-- **Fácil de usar: basta rodar no terminal, tudo guiado**
+## Install
 
----
+Download `WinDevCleaner.msi` from the latest successful
+[windows workflow run](https://github.com/paulo-raoni/WinDevCleaner/actions/workflows/windows.yml)
+(artifact `windevcleaner-slice-1`) and run it. It installs per user, without admin rights, to
+`%LOCALAPPDATA%\Programs\WinDevCleaner`, adds that folder to your `PATH` and adds a Start menu
+shortcut. Uninstall it from Settings > Apps.
 
-## 🗂️ Estrutura do Projeto
+## Use
 
-```plaintext
-WinDevCleaner/
-│
-├── main.py                # Menu principal: limpeza, modos avançados, integração
-├── cleaner.py             # Módulo com toda lógica de limpeza (safe/deep/nuclear)
-├── programs_parser.py     # Análise/limpeza manual de pastas/programas gigantes
-├── logs/                  # Logs em TXT por data
-├── reports/               # Relatórios CSV e HTML por execução
-├── README.md              # Você está aqui
-└── (future) obliterate.py # Remoção e análise forense de programas (coming soon)
-````
+```
+wdc scan                         # the default read scope
+wdc scan C:\Users\me\.vscode     # specific folders
+wdc scan --json                  # stable English JSON, for scripts and agents
+wdc --lang pt-BR scan
+```
 
----
+### Connect an AI agent
 
-## 👨‍💻 Como rodar
+Add `wdc mcp` as an MCP server (stdio) in your agent. For Claude Code:
 
-> **Pré-requisitos:**
->
-> * Python 3.8+
-> * (Opcional, mas recomendado) Rodar como **Administrador** para deletar tudo
+```
+claude mcp add windevcleaner -- wdc mcp
+```
 
-1. **Clone o repositório**
+Codex and other MCP clients take the same command. Tools: `scan` and `tree` (drill into a
+folder of the latest scan). With the app open, every call runs in the app while you watch; with
+it closed, `wdc mcp` runs headless (`wdc mcp --show` opens the app first).
 
-   ```sh
-   git clone https://github.com/seuuser/windevcleaner.git
-   cd windevcleaner
-   ```
+## Data folder
 
-2. **(Opcional) Crie um ambiente virtual**
+`%LOCALAPPDATA%\WinDevCleaner`: `snapshots\` and `activity.jsonl` (what agents did). Nothing
+else is written.
 
-   ```sh
-   python -m venv venv
-   venv\Scripts\activate
-   ```
+## Development
 
-3. **Instale as dependências**
+All building and testing runs in the cloud and on GitHub's `windows-latest` runner, never on
+the owner's laptop. The workflow `.github/workflows/windows.yml` builds both executables and the
+MSI, runs the Windows fixtures, the budget check of plan section 6.4 (`tools/wdc-bench`), and
+the guard check (`ci/guard-check.sh`), which removes each guarding line of the product code and
+requires the tests that depend on it to fail.
 
-   ```sh
-   pip install colorama
-   ```
+Workspace:
 
-4. **Rode o menu principal**
+| Crate | What |
+|---|---|
+| `crates/wdc-core` | the engine: scanner, snapshots, messages, activity log, app link, agent tools |
+| `crates/wdc-cli` | `wdc.exe`: `scan` and `mcp` |
+| `crates/wdc-app` | `WinDevCleaner.exe` (egui) |
+| `crates/wdc-testkit` | Windows fixtures and measurement helpers for tests (not shipped) |
+| `tools/wdc-bench` | the budget check (not shipped) |
+| `installer` | the WiX v5 MSI definition |
 
-   ```sh
-   python main.py
-   ```
+## Languages
 
----
+The project (code, documentation, commits) is in English. The app and the command line speak
+English and Brazilian Portuguese; the pt-BR texts live only in the message catalogue
+(`crates/wdc-core/src/i18n.rs`).
 
-## 💡 Principais Funcionalidades
+## License
 
-* **Modos de limpeza**
-
-  * Safe: só cache/lixo seguro
-  * Deep: vai em arquivos grandes e programas pouco críticos
-  * Nuclear: pra quando só um apocalipse resolve
-  * Manual/Rankeada: você escolhe o que quer apagar
-
-* **Relatórios detalhados**
-
-  * Espaço que será/foi liberado
-  * Logs em TXT, CSV e HTML (salvos em `logs/` e `reports/`)
-
-* **Dry-run e real-run**
-
-  * Veja quanto será apagado ANTES de se arrepender
-
-* **Extremamente modular**
-
-  * Fácil criar novos modos, adicionar pastas, ou integrar com IA (!)
-
----
-
-## ⚠️ AVISOS E ALERTAS
-
-* **USE O MODO NUCLEAR/INSANITY POR SUA CONTA E RISCO!**
-* Sempre cheque o relatório dry-run antes de executar real-run.
-* Se deletar programas críticos, pode dar ruim. Leia, pense, depois execute.
-
----
-
-## 📝 Roadmap (To-Do/Futuro)
-
-* [x] Modularização por arquivos
-* [x] Logs bonitos e relatórios automáticos
-* [x] Manual de uso no terminal
-* [ ] Modo **Obliterate**: desinstalar programas 100% (em breve)
-* [ ] Integração IA para análise de riscos e sugestões (!)
-* [ ] Instalação por pip/winget
-
----
-
-## 🖼️ Exemplos Visuais
-
-<details>
-<summary>Clique para ver prints (logs/reports)...</summary>
-
-![print-report-html](docs/imagens/exemplo-report.png)
-![print-csv](docs/imagens/exemplo-csv.png)
-
-</details>
-
----
-
-## 🤝 Contribuindo
-
-Contribuições são super bem-vindas!
-
-* Abra uma Issue pra ideias ou bugs
-* Faça um PR limpinho, explique bem
-* Propague o caos de forma ética! 🧹💣
-
----
-
-## 🦾 FAQ Rápido
-
-* **Roda no Windows 10/11?**
-
-  * Sim!
-* **Pode deletar o próprio script?**
-
-  * Só se escolher o modo *insanity* (não recomendado)
-* **Dá pra plugar IA?**
-
-  * Está nos planos! (Temos exemplos e hooks prontos)
-* **Como saber o que vai apagar?**
-
-  * Use sempre o dry-run e veja os relatórios!
-
----
-
-## 👽 Licença
-
-MIT – Limpe o que quiser, com responsabilidade!
-
----
-
-### “Limpar nunca foi tão divertido. Menos pro seu disco, que chora de alegria!”
-
----
+MIT, see [LICENSE](LICENSE).
