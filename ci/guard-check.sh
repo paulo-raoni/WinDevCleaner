@@ -38,6 +38,16 @@ CASES=(
   "snapshot-retention|wdc-cli|growth|snapshot_retention_keeps_only_the_last_ten_and_reports_their_size"
   "recycle-bin|wdc-core|system|recycle_bin_size_comes_from_the_shell"
   "system-file-size|wdc-core|system|paging_swap_and_hibernation_files_match_the_volume_listing"
+  "listed-in-file|wdc-core|rules|vscode_obsolete_extension_needs_the_obsolete_list_no_reference_and_vscode_closed"
+  "not-referenced-by|wdc-core|rules|vscode_obsolete_extension_needs_the_obsolete_list_no_reference_and_vscode_closed"
+  "process-not-running|wdc-core|rules|vscode_obsolete_extension_needs_the_obsolete_list_no_reference_and_vscode_closed"
+  "name-matches-regex|wdc-core|rules|vscode_guid_staging_folder_needs_a_day_and_no_reference"
+  "older-than|wdc-core|rules|vscode_guid_staging_folder_needs_a_day_and_no_reference"
+  "driver-version|wdc-core|rules|nvidia_artifacts_older_equal_and_newer_than_the_installed_driver"
+  "local-report-only|wdc-core|rules|a_local_rule_cannot_make_an_item_actionable"
+  "local-origin|wdc-core|rules|a_local_rule_cannot_make_an_item_actionable"
+  "unknown-flag|wdc-core|rules|large_folders_no_rule_knows_are_flagged"
+  "expected-freed|wdc-core|rules|the_cowork_case_two_names_one_outside_expected_freed_zero"
 )
 
 run_test() { # package target name log

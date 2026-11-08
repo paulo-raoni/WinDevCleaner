@@ -73,6 +73,11 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
         changes.iter().any(|c| c["change"] == "new" && c["path"].as_str().unwrap().ends_with("new-package")),
         "{changes:?}"
     );
+    // Slice 3: the agent asks why a folder is here; the app shows the same explanation.
+    let r = mcp.call("explain", serde_json::json!({ "path": fixture.join("node_modules").to_string_lossy() }));
+    assert_ne!(r["isError"], true, "{r}");
+    let explained = r["structuredContent"].clone();
+    assert_eq!(explained["unknown"], true, "no rule knows a test folder: {explained}");
     let r = mcp.call("system_items", serde_json::json!({}));
     assert_ne!(r["isError"], true, "{r}");
     assert!(r["structuredContent"]["items"].as_array().unwrap().iter().any(|i| i["kind"] == "recycle_bin"));
@@ -80,7 +85,7 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
     // The app's activity log shows the agent and each of its calls, with the same result.
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut log = activity(&data);
-    while Instant::now() < deadline && log.iter().filter(|e| e["status"] == "done").count() < 5 {
+    while Instant::now() < deadline && log.iter().filter(|e| e["status"] == "done").count() < 6 {
         std::thread::sleep(Duration::from_millis(100));
         log = activity(&data);
     }
@@ -103,6 +108,9 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
     let diff_done = log.iter().find(|e| e["kind"] == "call" && e["tool"] == "diff" && e["status"] == "done");
     guard_assert!("activity-mirror", diff_done.is_some(), "the agent's diff appears in the app's activity log");
     assert_eq!(diff_done.unwrap()["data"]["changes"].as_u64().unwrap() as usize, changes.len(), "the app shows the same diff");
+    let explain_done = log.iter().find(|e| e["kind"] == "call" && e["tool"] == "explain" && e["status"] == "done");
+    guard_assert!("activity-mirror", explain_done.is_some(), "the agent's explain appears in the app's activity log");
+    assert_eq!(explain_done.unwrap()["data"]["expected_freed_bytes"], explained["expected_freed_bytes"], "the app shows the same answer");
     guard_assert!(
         "activity-mirror",
         log.iter().any(|e| e["kind"] == "call" && e["tool"] == "system_items" && e["status"] == "done"),
