@@ -22,6 +22,9 @@ pub const TREE: &str = "tree";
 pub const DIFF: &str = "diff";
 pub const SYSTEM_ITEMS: &str = "system_items";
 pub const EXPLAIN: &str = "explain";
+pub const PLAN: &str = "plan";
+pub const QUARANTINE: &str = "quarantine";
+pub const REQUEST_APPLY: &str = "request_apply";
 
 /// Folders at least this large that no rule knows are flagged after a scan.
 pub const UNKNOWN_LARGE_BYTES: u64 = 1024 * 1024 * 1024;
@@ -109,6 +112,54 @@ pub fn specs() -> Vec<ToolSpec> {
                 hibernation files, error reports, crash and memory dumps, System Restore. Always report-only; each \
                 item names the Windows setting or tool that manages it. When the app is open, the app shows them.",
             schema: || json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        },
+        ToolSpec {
+            name: PLAN,
+            description: "Drafts a plan: the items that built-in rules may move to quarantine now, each explained \
+                (rule, class, evidence, conditions) with its size on disk and the bytes expected to be freed (a file \
+                with another name outside the item counts 0). With no `paths`, looks at every place a built-in rule \
+                that can act knows. Changes nothing on disk except the plan file in the tool's data folder. A plan is \
+                a list of choices, not an authorisation: applying it needs a person (see `request_apply`).",
+            schema: || {
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "paths": { "type": "array", "items": { "type": "string" },
+                                   "description": "Only these items (or the rule items containing them)." },
+                        "classes": { "type": "array", "items": { "type": "string",
+                                     "enum": ["regenerable-cache", "install-leftover"] } },
+                        "rules": { "type": "array", "items": { "type": "string" }, "description": "Only these rule ids." }
+                    },
+                    "additionalProperties": false
+                })
+            },
+        },
+        ToolSpec {
+            name: QUARANTINE,
+            description: "What the quarantine holds: each item with its id, original path, rule, class, size on disk and \
+                when it was moved, and the total held (quarantine frees nothing until purged). Read-only.",
+            schema: || json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        },
+        ToolSpec {
+            name: REQUEST_APPLY,
+            description: "Asks the person to approve a drafted plan. With the WinDevCleaner app open, the app shows an \
+                approval card with the plan and each item's evidence, and the person approves with Windows Hello (or \
+                a click on the card where Hello is not set up); the call returns approved (with what was moved and the \
+                free space measured), rejected or timed out. With the app closed it returns `needs-human`: nothing is \
+                changed, and the person can run `wdc apply --plan <file>` in their own terminal. An agent can never \
+                apply, purge or restore by itself.",
+            schema: || {
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "plan": { "type": "string", "description": "The plan's hash (at least its first 8 digits), from `plan`." },
+                        "purge_now": { "type": "boolean",
+                                       "description": "Ask to delete right away instead of keeping 7 days (only caches and install leftovers)." }
+                    },
+                    "required": ["plan"],
+                    "additionalProperties": false
+                })
+            },
         },
     ]
 }
@@ -271,6 +322,93 @@ pub fn run_tree(report: Option<&ScanReport>, path: &str, limit: usize) -> Result
     report
         .tree_json(path, limit)
         .ok_or_else(|| format!("`{path}` is not a folder of the latest scan"))
+}
+
+/// Parsed arguments of `plan`.
+pub fn parse_plan_args(args: &Value) -> Result<crate::plan::DraftOptions, String> {
+    let mut o = crate::plan::DraftOptions::default();
+    let obj = match args {
+        Value::Null => return Ok(o),
+        Value::Object(m) => m,
+        _ => return Err("arguments must be an object".into()),
+    };
+    let strings = |k: &str| -> Result<Vec<String>, String> {
+        match obj.get(k) {
+            None => Ok(Vec::new()),
+            Some(Value::Array(a)) => a.iter().map(|v| v.as_str().map(String::from).ok_or(format!("`{k}` must be strings"))).collect(),
+            Some(_) => Err(format!("`{k}` must be an array")),
+        }
+    };
+    for k in obj.keys() {
+        if !["paths", "classes", "rules"].contains(&k.as_str()) {
+            return Err(format!("unknown argument `{k}`"));
+        }
+    }
+    o.paths = strings("paths")?;
+    o.rules = strings("rules")?;
+    for c in strings("classes")? {
+        o.classes.push(serde_json::from_value(Value::String(c.clone())).map_err(|_| format!("unknown class `{c}`"))?);
+    }
+    Ok(o)
+}
+
+/// `plan`: drafts a plan with the built-in and local rules and saves it in the data folder.
+pub fn run_plan(opts: &crate::plan::DraftOptions, data_dir: &Path) -> Result<(crate::plan::Draft, PathBuf), String> {
+    let rules = crate::rules::RuleSet::with_local(data_dir);
+    let ctx = crate::rules::Context::system();
+    let now = crate::time::now_unix_ms() / 1000;
+    let d = crate::plan::draft(opts, &rules, &ctx, Some(&data_dir.to_string_lossy()), now);
+    let path = d.plan.save_in(data_dir).map_err(|e| format!("could not save the plan: {e}"))?;
+    Ok((d, path))
+}
+
+/// The JSON an agent gets for a drafted plan.
+pub fn plan_json(d: &crate::plan::Draft, path: &Path) -> Value {
+    json!({
+        "hash": d.plan.hash,
+        "file": path.to_string_lossy(),
+        "created_at": crate::time::rfc3339(d.plan.created_at * 1000),
+        "items": d.plan.items,
+        "bytes_on_disk": d.plan.bytes_on_disk(),
+        "expected_freed_bytes": d.plan.expected_freed_bytes(),
+        "not_included": d.not_included,
+        "next": "Ask the person to approve with `request_apply` (or they run `wdc apply --plan <file>` themselves).",
+    })
+}
+
+/// `quarantine`: what is held.
+pub fn run_quarantine(data_dir: &Path) -> Value {
+    let items = crate::quarantine::list(data_dir);
+    let held: u64 = items.iter().map(|e| e.bytes_on_disk).sum();
+    json!({ "held_bytes": held, "items": items })
+}
+
+/// Parsed arguments of `request_apply`: plan hash and whether to purge right away.
+pub fn parse_request_apply_args(args: &Value) -> Result<(String, bool), String> {
+    let plan = args.get("plan").and_then(Value::as_str).ok_or("`plan` is required")?.to_string();
+    let purge_now = match args.get("purge_now") {
+        None => false,
+        Some(v) => v.as_bool().ok_or("`purge_now` must be true or false")?,
+    };
+    if let Some(m) = args.as_object() {
+        for k in m.keys() {
+            if !["plan", "purge_now"].contains(&k.as_str()) {
+                return Err(format!("unknown argument `{k}`"));
+            }
+        }
+    }
+    Ok((plan, purge_now))
+}
+
+/// What `request_apply` returns when no person can be asked (the app is closed).
+pub fn needs_human(plan: &str) -> Value {
+    json!({
+        "status": "needs-human",
+        "plan": plan,
+        "changed": false,
+        "message": "Applying needs a person. Open the WinDevCleaner app and ask again, or the person runs \
+            `wdc apply --plan <file>` in their own terminal. Nothing was changed."
+    })
 }
 
 /// Short result line for the activity panel and logs: totals of a scan summary.

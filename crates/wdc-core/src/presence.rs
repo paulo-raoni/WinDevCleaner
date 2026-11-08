@@ -99,6 +99,11 @@ pub fn hello_available() -> bool {
     platform::hello_available()
 }
 
+/// The window in front now (the app's own, when the person just clicked in it).
+pub fn foreground_window() -> isize {
+    platform::foreground_window()
+}
+
 /// Asks Windows Hello, with its prompt owned by `hwnd`.
 pub fn hello(hwnd: isize, message: &str) -> Result<Proof, PresenceError> {
     platform::hello(hwnd, message).map(|_| Proof::new(Method::WindowsHello))
@@ -185,6 +190,10 @@ mod platform {
         unsafe { GetConsoleWindow() as isize }
     }
 
+    pub fn foreground_window() -> isize {
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() as isize }
+    }
+
     /// Runs `f` on a new thread initialised for WinRT (multithreaded), so the caller's own COM
     /// state (the app's UI thread) is never touched.
     fn in_mta<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
@@ -268,6 +277,10 @@ mod platform {
     }
 
     pub fn console_window() -> isize {
+        0
+    }
+
+    pub fn foreground_window() -> isize {
         0
     }
 

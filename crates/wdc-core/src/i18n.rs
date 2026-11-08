@@ -94,8 +94,8 @@ macro_rules! messages {
 messages! {
     // Command line.
     CliUsage =>
-        "WinDevCleaner {version}: find where your disk space is. Read-only in this version.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc explain PATH [--json]\n      Why a folder or file is here, the rule that knows it, and what deleting it would free.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless.\n  wdc --version\n",
-        "WinDevCleaner {version}: descubra onde está o espaço do seu disco. Somente leitura nesta versão.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc explain CAMINHO [--json]\n      Por que uma pasta ou arquivo está aqui, a regra que o conhece, e o que apagar liberaria.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela.\n  wdc --version\n";
+        "WinDevCleaner {version}: find where your disk space is, and clean it safely.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc explain PATH [--json]\n      Why a folder or file is here, the rule that knows it, and what deleting it would free.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc plan [PATH ...] [--class CLASS] [--rule ID] [-o FILE] [--json]\n      Drafts a plan of what may move to quarantine now, each item explained. Changes nothing.\n  wdc plan show FILE [--json]\n  wdc apply --plan FILE [--purge-now] [--json]\n      Moves the plan's items to quarantine after re-checking each one. Needs proof that\n      you are here (Windows Hello, or a code shown in a desktop dialog).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Deletes quarantined items older than 7 days; --now also younger caches and install\n      leftovers. Restore and purge need the same proof.\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless. Agents can never apply by themselves.\n  wdc --version\n",
+        "WinDevCleaner {version}: descubra onde está o espaço do seu disco, e limpe com segurança.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc explain CAMINHO [--json]\n      Por que uma pasta ou arquivo está aqui, a regra que o conhece, e o que apagar liberaria.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc plan [CAMINHO ...] [--class CLASSE] [--rule ID] [-o ARQUIVO] [--json]\n      Monta um plano do que pode ir para a quarentena agora, cada item explicado. Não altera nada.\n  wdc plan show ARQUIVO [--json]\n  wdc apply --plan ARQUIVO [--purge-now] [--json]\n      Move os itens do plano para a quarentena depois de checar cada um de novo. Precisa de\n      prova de que você está aqui (Windows Hello, ou um código numa janela da área de trabalho).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Apaga itens da quarentena com mais de 7 dias; --now também caches e sobras de instalação\n      mais novos. Restaurar e apagar precisam da mesma prova.\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela. Agentes nunca aplicam sozinhos.\n  wdc --version\n";
     CliUnknownCommand =>
         "Unknown command or option: {arg}. Run `wdc --help`.",
         "Comando ou opção desconhecida: {arg}. Rode `wdc --help`.";
@@ -243,8 +243,8 @@ messages! {
         "Language",
         "Idioma";
     AppReadOnlyNote =>
-        "Read-only: this version never changes your files.",
-        "Somente leitura: esta versão nunca altera seus arquivos.";
+        "Nothing on disk changes until you approve it here, and quarantined items can be restored.",
+        "Nada no disco muda até você aprovar aqui, e itens na quarentena podem ser restaurados.";
     AppHumanScan =>
         "you",
         "você";
@@ -595,6 +595,123 @@ messages! {
     AppActExplain =>
         "explaining {path}",
         "explicando {path}";
+    CliPlanHeader =>
+        "Plan {hash} ({at}): {n} items, {size} on disk, {freed} freed once purged.",
+        "Plano {hash} ({at}): {n} itens, {size} em disco, {freed} liberados depois de apagados.";
+    CliPlanFrees =>
+        "frees {size}",
+        "libera {size}";
+    CliPlanEmpty =>
+        "Nothing is eligible now.",
+        "Nada pode ser movido agora.";
+    CliPlanNotIncluded =>
+        "Not included:",
+        "Fora do plano:";
+    CliPlanSaved =>
+        "Plan saved: {path}",
+        "Plano salvo: {path}";
+    CliPlanNext =>
+        "Review it with `wdc plan show {path}`, then apply it yourself with `wdc apply --plan {path}`.",
+        "Revise com `wdc plan show {path}` e aplique você mesmo com `wdc apply --plan {path}`.";
+    CliRefused =>
+        "Refused: {why}",
+        "Recusado: {why}";
+    CliFreeSpace =>
+        "Free space on {volume}: {before} before, {after} after ({measured}; expected {expected}).",
+        "Espaço livre em {volume}: {before} antes, {after} depois ({measured}; esperado {expected}).";
+    CliApplyAsk =>
+        "These items move to quarantine (nothing is deleted; `wdc restore` puts them back). This needs proof that you are here.",
+        "Estes itens vão para a quarentena (nada é apagado; `wdc restore` devolve). Isto precisa de prova de que você está aqui.";
+    CliApplyAskPurge =>
+        "These items move to quarantine and caches and install leftovers are deleted right away. This needs proof that you are here.",
+        "Estes itens vão para a quarentena e caches e sobras de instalação são apagados na hora. Isto precisa de prova de que você está aqui.";
+    CliApplyWhat =>
+        "Move {n} items ({size}) of WinDevCleaner plan {hash} to quarantine",
+        "Mover {n} itens ({size}) do plano {hash} do WinDevCleaner para a quarentena";
+    CliApplyMoved =>
+        "Moved {n} items ({size}) to quarantine.",
+        "{n} itens ({size}) movidos para a quarentena.";
+    CliSkipped =>
+        "skipped {path}: {why}",
+        "ignorado {path}: {why}";
+    CliApplyNext =>
+        "Quarantine frees nothing yet: `wdc purge` deletes items after 7 days ({size} expected), `wdc restore ID` puts one back.",
+        "A quarentena ainda não libera nada: `wdc purge` apaga os itens depois de 7 dias ({size} esperados), `wdc restore ID` devolve um.";
+    CliPurged =>
+        "Deleted {n} items ({size}) for good.",
+        "{n} itens ({size}) apagados de vez.";
+    CliQuarantineEmpty =>
+        "Quarantine is empty.",
+        "A quarentena está vazia.";
+    CliQuarantineHeld =>
+        "Quarantine holds {size} in {n} items (it frees nothing until purged).",
+        "A quarentena guarda {size} em {n} itens (não libera nada até ser apagada).";
+    CliQuarantineLine =>
+        "{rule}, {days} days ago, at {stored}",
+        "{rule}, há {days} dias, em {stored}";
+    CliRestoreWhat =>
+        "Put {stored} back at {original}",
+        "Devolver {stored} para {original}";
+    CliRestored =>
+        "Restored {path}.",
+        "{path} restaurado.";
+    CliPurgeWhat =>
+        "Delete quarantined items for good (up to {size})",
+        "Apagar de vez itens da quarentena (até {size})";
+    AppTabPlan =>
+        "Plan",
+        "Plano";
+    AppTabQuarantine =>
+        "Quarantine",
+        "Quarentena";
+    AppDraftPlan =>
+        "Draft a plan",
+        "Montar um plano";
+    AppPlanNone =>
+        "No plan yet. Draft one, or let an agent draft one.",
+        "Nenhum plano ainda. Monte um, ou deixe um agente montar.";
+    AppApprovalTitle =>
+        "{client} asks you to approve this plan",
+        "{client} pede sua aprovação para este plano";
+    AppApprovalTitleYou =>
+        "Approve this plan?",
+        "Aprovar este plano?";
+    AppApproveHello =>
+        "Approve with Windows Hello",
+        "Aprovar com o Windows Hello";
+    AppApproveClick =>
+        "Approve",
+        "Aprovar";
+    AppReject =>
+        "Reject",
+        "Recusar";
+    AppApplyPlan =>
+        "Move to quarantine...",
+        "Mover para a quarentena...";
+    AppApplyPurgeNow =>
+        "Move and delete caches now...",
+        "Mover e apagar caches agora...";
+    AppFreeSpace =>
+        "Free space on {volume}: {before} before, {after} after.",
+        "Espaço livre em {volume}: {before} antes, {after} depois.";
+    AppRestore =>
+        "Restore",
+        "Restaurar";
+    AppPurgeOld =>
+        "Delete items older than 7 days",
+        "Apagar itens com mais de 7 dias";
+    AppPurgeNow =>
+        "Delete caches and leftovers now",
+        "Apagar caches e sobras agora";
+    AppActPlan =>
+        "drafting a plan",
+        "montando um plano";
+    AppActQuarantine =>
+        "reading the quarantine",
+        "lendo a quarentena";
+    AppActRequestApply =>
+        "asking you to approve plan {hash}",
+        "pedindo sua aprovação do plano {hash}";
     PlanUnknownFormat =>
         "This plan file has format {format}, which this version does not read. Draft the plan again.",
         "Este arquivo de plano tem formato {format}, que esta versão não lê. Gere o plano de novo.";

@@ -1,6 +1,7 @@
 //! `wdc.exe`: WinDevCleaner's headless command line (plan, section 4.4) and MCP server
-//! (`wdc mcp`, section 4.6). Read-only in slice 1.
+//! (`wdc mcp`, section 4.6).
 
+mod change;
 mod mcp;
 
 use std::path::PathBuf;
@@ -46,6 +47,11 @@ fn main() -> ExitCode {
         Some("scan") => scan_command(&rest[1..], lang),
         Some("diff") => diff_command(&rest[1..], lang),
         Some("explain") => explain_command(&rest[1..], lang),
+        Some("plan") => change::plan_command(&rest[1..], lang),
+        Some("apply") => change::apply_command(&rest[1..], lang),
+        Some("quarantine") => change::quarantine_command(&rest[1..], lang),
+        Some("restore") => change::restore_command(&rest[1..], lang),
+        Some("purge") => change::purge_command(&rest[1..], lang),
         Some("mcp") => {
             let show = match rest[1..].iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
                 [] => false,
@@ -247,6 +253,15 @@ fn print_human(lang: Lang, args: &ScanArgs, report: &wdc_core::scan::ScanReport,
         ),
         None => println!("{}", lang.t(Msg::CliCancelled)),
     }
+    held_if_any(lang);
+}
+
+/// Every command shows what the quarantine holds, when it holds something.
+fn held_if_any(lang: Lang) {
+    let data_dir = wdc_core::scope::data_dir();
+    if !wdc_core::quarantine::list(&data_dir).is_empty() {
+        println!("{}", change::held_line(lang, &data_dir));
+    }
 }
 
 fn print_system_items(lang: Lang, items: &[serde_json::Value]) {
@@ -334,6 +349,7 @@ fn diff_command(args: &[String], lang: Lang) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     print_diff(lang, &d);
+    held_if_any(lang);
     ExitCode::SUCCESS
 }
 
@@ -402,6 +418,7 @@ fn explain_command(args: &[String], lang: Lang) -> ExitCode {
         println!("{}", serde_json::to_string_pretty(&e).unwrap());
     } else {
         print_explanation(lang, &e);
+        held_if_any(lang);
     }
     ExitCode::SUCCESS
 }
