@@ -34,8 +34,22 @@ pub struct Loaded {
     pub children: Arc<Vec<Vec<u32>>>,
 }
 
+/// Which view the window shows. It follows the agent: its scan shows the tree, its `diff` the
+/// growth view, its `system_items` the system view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum View {
+    #[default]
+    Space,
+    Growth,
+    System,
+}
+
 #[derive(Default)]
 pub struct Shared {
+    pub view: View,
+    /// The latest comparison with the previous scan of the same folders, or why there is none.
+    pub diff: Option<Result<Arc<wdc_core::diff::Diff>, String>>,
+    pub system: Option<Arc<Vec<wdc_core::system::SystemItem>>>,
     pub loaded: Option<Loaded>,
     pub scanning: Option<ScanProgress>,
     /// Folder the view should show, and a counter so the view knows it changed. When an agent
@@ -92,9 +106,18 @@ impl AppCore {
         };
         let (report, summary) = tools::run_scan(args, &self.data_dir, Some(&mut on_progress), cancel);
         let children = report.children_index();
+        // What grew since the previous scan of the same folders, ready in the growth view.
+        let diff = tools::run_diff(&self.data_dir, wdc_core::diff::DiffOptions::default()).map(Arc::new);
+        let system: Option<Vec<wdc_core::system::SystemItem>> =
+            summary.get("system_items").and_then(|v| serde_json::from_value(v.clone()).ok());
         {
             let mut s = self.shared.lock().unwrap();
             s.scanning = None;
+            s.view = View::Space;
+            s.diff = Some(diff);
+            if let Some(items) = system {
+                s.system = Some(Arc::new(items));
+            }
             s.focus = report.roots.iter().find_map(|r| r.node);
             s.focus_seq += 1;
             s.loaded = Some(Loaded { report: Arc::new(report), children: Arc::new(children) });
@@ -117,6 +140,25 @@ impl AppCore {
                 }
             })
             .ok();
+    }
+
+    /// Reads the system items for the human (the button of the system view).
+    pub fn start_system_items(self: &Arc<Self>) {
+        let me = self.clone();
+        std::thread::Builder::new()
+            .name("system-items".into())
+            .spawn(move || {
+                let _background = wdc_core::background::ThreadBackground::enter();
+                let items = wdc_core::system::system_items();
+                me.shared.lock().unwrap().system = Some(Arc::new(items));
+                me.ctx.request_repaint();
+            })
+            .ok();
+    }
+
+    pub fn set_view(&self, v: View) {
+        self.shared.lock().unwrap().view = v;
+        self.ctx.request_repaint();
     }
 
     pub fn pause_agent(&self) {
@@ -151,6 +193,7 @@ fn call_target(tool: &str, args: &Value) -> String {
     match tool {
         tools::SCAN => tools::parse_scan_args(args).map(|a| a.target).unwrap_or_default(),
         tools::TREE => args.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
+        tools::DIFF | tools::SYSTEM_ITEMS => String::new(),
         _ => String::new(),
     }
 }
@@ -207,6 +250,31 @@ impl AgentHandler for AppCore {
                 self.ctx.request_repaint();
                 result
             }
+            tools::DIFF => {
+                let opts = tools::parse_diff_args(args)?;
+                let result = tools::run_diff(&self.data_dir, opts).map(Arc::new);
+                let value = result.as_ref().map(|d| serde_json::to_value(d.as_ref()).unwrap_or(Value::Null)).map_err(|e| e.clone());
+                {
+                    // The window shows the comparison the agent is reading.
+                    let mut s = self.shared.lock().unwrap();
+                    s.diff = Some(result);
+                    s.view = View::Growth;
+                }
+                self.ctx.request_repaint();
+                value
+            }
+            tools::SYSTEM_ITEMS => {
+                let _background = wdc_core::background::ThreadBackground::enter();
+                let items = wdc_core::system::system_items();
+                let value = serde_json::json!({ "total_bytes": wdc_core::system::total(&items), "items": items });
+                {
+                    let mut s = self.shared.lock().unwrap();
+                    s.system = Some(Arc::new(items));
+                    s.view = View::System;
+                }
+                self.ctx.request_repaint();
+                Ok(value)
+            }
             other => Err(format!("unknown tool `{other}`")),
         }
     }
@@ -222,12 +290,28 @@ impl AgentHandler for AppCore {
                         Msg::AppActScanResult,
                         &[("size", &wdc_core::fmt::bytes(bytes)), ("files", &wdc_core::fmt::count(files))],
                     )
+                } else if let Some(delta) = v.get("delta_bytes").and_then(Value::as_i64) {
+                    let sign = if delta < 0 { "-" } else { "+" };
+                    format!("{sign}{}", wdc_core::fmt::bytes(delta.unsigned_abs()))
+                } else if let Some(bytes) = v.get("total_bytes").and_then(Value::as_u64) {
+                    wdc_core::fmt::bytes(bytes)
                 } else if let Some(bytes) = v.get("bytes_on_disk").and_then(Value::as_u64) {
                     wdc_core::fmt::bytes(bytes)
                 } else {
                     String::new()
                 };
-                let data = if totals.is_null() { None } else { Some(serde_json::json!({ "totals": totals })) };
+                let data = if !totals.is_null() {
+                    Some(serde_json::json!({ "totals": totals }))
+                } else if v.get("delta_bytes").is_some() {
+                    Some(serde_json::json!({
+                        "delta_bytes": v["delta_bytes"],
+                        "changes": v["dirs"].as_array().map(|a| a.len()).unwrap_or(0),
+                    }))
+                } else if v.get("total_bytes").is_some() {
+                    Some(serde_json::json!({ "total_bytes": v["total_bytes"] }))
+                } else {
+                    None
+                };
                 self.log.update(entry, Status::Done, Some(text), data);
             }
             Err(e) => self.log.update(entry, Status::Failed, Some(e.clone()), None),

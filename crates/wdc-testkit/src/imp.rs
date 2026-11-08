@@ -407,3 +407,30 @@ pub fn wait_for_pipe(name: &str, timeout: Duration) -> bool {
     }
     false
 }
+
+/// Sends a file to the Recycle Bin, as Explorer's Delete does (`SHFileOperationW` with undo).
+pub fn send_to_recycle_bin(path: &Path) {
+    use windows_sys::Win32::UI::Shell::{
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW,
+    };
+    // A list of NUL-terminated names ending with an extra NUL.
+    let mut from: Vec<u16> = std::path::absolute(path).unwrap().as_os_str().encode_wide().collect();
+    from.extend([0, 0]);
+    let mut op: SHFILEOPSTRUCTW = unsafe { std::mem::zeroed() };
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.as_ptr();
+    op.fFlags = (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI) as u16;
+    let r = unsafe { SHFileOperationW(&mut op) };
+    assert_eq!(r, 0, "SHFileOperationW failed: {r}");
+    assert!(op.fAnyOperationsAborted == 0);
+}
+
+/// Length of a file in a volume's root as PowerShell lists it (`Get-ChildItem -Force`), or
+/// None when the file does not exist. An oracle independent of the engine's API.
+pub fn powershell_root_file_length(drive: char, name: &str) -> Option<u64> {
+    let script = format!(
+        "$f = Get-ChildItem -Force -LiteralPath '{drive}:\\' -Filter '{name}' -ErrorAction SilentlyContinue; if ($f) {{ $f.Length }}"
+    );
+    let out = Command::new("powershell").args(["-NoProfile", "-Command", &script]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}

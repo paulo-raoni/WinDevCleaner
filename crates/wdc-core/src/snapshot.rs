@@ -125,10 +125,13 @@ pub fn save(report: &ScanReport, data_dir: &Path, max_depth: u16, keep: usize) -
     std::fs::rename(&tmp, &path)?;
 
     let mut existing = list(data_dir)?;
+    // Only the newest `keep` snapshots stay (plan 4.1).
+    // GUARD-BEGIN(snapshot-retention)
     while existing.len() > keep {
         let (old, _) = existing.remove(0);
         let _ = std::fs::remove_file(old);
     }
+    // GUARD-END(snapshot-retention)
     let total_bytes = existing.iter().map(|(_, s)| *s).sum();
     Ok(Saved { path: path.to_string_lossy().into_owned(), kept: existing.len(), total_bytes })
 }

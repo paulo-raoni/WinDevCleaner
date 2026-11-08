@@ -6,12 +6,14 @@
 
 pub mod activity;
 pub mod background;
+pub mod diff;
 pub mod fmt;
 pub mod i18n;
 pub mod link;
 pub mod scan;
 pub mod scope;
 pub mod snapshot;
+pub mod system;
 pub mod time;
 pub mod tools;
 
