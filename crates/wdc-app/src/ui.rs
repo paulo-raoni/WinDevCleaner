@@ -11,7 +11,7 @@ use wdc_core::fmt;
 use wdc_core::i18n::{Lang, Msg};
 use wdc_core::scan::ScanReport;
 
-use crate::core::{AppCore, ScanBy};
+use crate::core::{AppCore, ScanBy, View};
 
 /// Children shown per folder before "... and N more".
 const MAX_CHILDREN: usize = 300;
@@ -49,6 +49,8 @@ fn describe(lang: Lang, e: &Entry) -> String {
         What::Call { tool, target } => match tool.as_str() {
             wdc_core::tools::SCAN => lang.fmt(Msg::AppActScanning, &[("roots", target)]),
             wdc_core::tools::TREE => lang.fmt(Msg::AppActTree, &[("path", target)]),
+            wdc_core::tools::DIFF => lang.t(Msg::AppActDiff).to_string(),
+            wdc_core::tools::SYSTEM_ITEMS => lang.t(Msg::AppActSystem).to_string(),
             other => format!("{other} {target}"),
         },
     }
@@ -192,8 +194,30 @@ impl eframe::App for WdcApp {
 
         // Where is my space?
         egui::CentralPanel::default_margins().show(ui, |ui| {
-            ui.heading(lang.t(Msg::AppWhereIsMySpace));
+            let view = core.shared.lock().unwrap().view;
+            ui.horizontal(|ui| {
+                for (v, label) in [
+                    (View::Space, Msg::AppWhereIsMySpace),
+                    (View::Growth, Msg::AppTabGrowth),
+                    (View::System, Msg::AppTabSystem),
+                ] {
+                    if ui.selectable_label(view == v, RichText::new(lang.t(label)).heading()).clicked() {
+                        core.set_view(v);
+                    }
+                }
+            });
             ui.separator();
+            match view {
+                View::Growth => {
+                    growth_view(ui, lang, &core);
+                    return;
+                }
+                View::System => {
+                    system_view(ui, lang, &core);
+                    return;
+                }
+                View::Space => {}
+            }
             let (loaded, focus, focus_seq) = {
                 let s = core.shared.lock().unwrap();
                 (s.loaded.as_ref().map(|l| (l.report.clone(), l.children.clone())), s.focus, s.focus_seq)
@@ -269,4 +293,88 @@ impl WdcApp {
             resp.header_response.scroll_to_me(Some(egui::Align::Center));
         }
     }
+}
+
+fn signed(delta: i64) -> String {
+    let sign = if delta < 0 { "-" } else { "+" };
+    format!("{sign}{}", fmt::bytes(delta.unsigned_abs()))
+}
+
+/// "What grew?": the latest comparison, new and grown folders first.
+fn growth_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
+    use wdc_core::diff::Change;
+    let diff = core.shared.lock().unwrap().diff.clone();
+    let d = match diff {
+        Some(Ok(d)) => d,
+        _ => {
+            ui.label(lang.t(Msg::AppGrowthNone));
+            return;
+        }
+    };
+    ui.label(
+        RichText::new(lang.fmt(
+            Msg::CliDiffHeader,
+            &[("from", &d.from.created), ("to", &d.to.created), ("delta", &signed(d.delta_bytes))],
+        ))
+        .strong(),
+    );
+    if d.dirs.is_empty() {
+        ui.label(lang.fmt(Msg::CliDiffNone, &[("min", &fmt::bytes(d.min_bytes))]));
+    }
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        egui::Grid::new("growth").striped(true).num_columns(3).show(ui, |ui| {
+            for c in &d.dirs {
+                let color = if c.delta_bytes > 0 { Color32::from_rgb(0xeb, 0x57, 0x57) } else { Color32::from_rgb(0x27, 0xae, 0x60) };
+                ui.label(RichText::new(signed(c.delta_bytes)).monospace().color(color));
+                ui.label(lang.t(match c.change {
+                    Change::New => Msg::DiffNew,
+                    Change::Grown => Msg::DiffGrown,
+                    Change::Shrunk => Msg::DiffShrunk,
+                    Change::Removed => Msg::DiffRemoved,
+                }));
+                ui.label(RichText::new(&c.path).monospace());
+                ui.end_row();
+            }
+        });
+        if d.more > 0 {
+            ui.label(RichText::new(lang.fmt(Msg::CliDiffMore, &[("n", &d.more.to_string())])).weak());
+        }
+        if !d.files.is_empty() {
+            ui.add_space(8.0);
+            ui.label(RichText::new(lang.t(Msg::CliDiffFiles)).strong());
+            for f in &d.files {
+                ui.label(RichText::new(format!("{:>11}  {}", signed(f.delta_bytes), f.path)).monospace());
+            }
+        }
+    });
+}
+
+/// System items: always report-only, each with the Windows tool that manages it.
+fn system_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
+    if ui.button(lang.t(Msg::AppReadSystem)).clicked() {
+        core.start_system_items();
+    }
+    let items = core.shared.lock().unwrap().system.clone();
+    let Some(items) = items else {
+        ui.label(lang.t(Msg::AppSystemNotRead));
+        return;
+    };
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        for it in items.iter().filter(|i| i.status != wdc_core::system::Status::Absent) {
+            let size = match (it.bytes, it.status.note()) {
+                (Some(b), None) => fmt::bytes(b),
+                (_, Some(note)) => lang.t(note).to_string(),
+                (None, None) => String::new(),
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(format!("{size:>10}")).monospace().strong());
+                ui.label(RichText::new(lang.t(it.kind.name())).strong());
+                if let Some(p) = &it.path {
+                    ui.label(RichText::new(p).monospace().weak());
+                }
+            });
+            ui.label(RichText::new(lang.t(it.kind.managed_by())).weak());
+            ui.add_space(4.0);
+        }
+    });
 }
