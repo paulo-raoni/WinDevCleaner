@@ -4,8 +4,9 @@ Finds where the disk space of a Windows developer machine went, so that an AI ag
 investigate and propose, and a human approves before anything is touched.
 
 The tool is being rebuilt in Rust, one vertical slice at a time, following
-[the rebuild plan](docs/rebuild-plan.md). **This version has slices 1 and 2, "Where is my
-space?" and "What grew since last time?": it is read-only.** It never changes anything on disk outside its own data folder.
+[the rebuild plan](docs/rebuild-plan.md). **This version has slices 1 to 3: "Where is my space?",
+"What grew since last time?" and "Why is this here, and what would deleting it free?". It is
+read-only.** It never changes anything on disk outside its own data folder.
 
 ## What it does now
 
@@ -25,7 +26,17 @@ space?" and "What grew since last time?": it is read-only.** It never changes an
   Windows' own APIs and always report-only: Recycle Bin, paging, swap and hibernation files,
   error reports, crash and memory dumps, and System Restore (which only an administrator can
   read). Each one names the Windows setting or tool that manages it.
-- `WinDevCleaner.exe` shows the tree of sizes, a "What grew?" view and the system items. When an AI agent connects through `wdc mcp`, the
+- `wdc explain PATH` says why a folder or file is here: the rule that knows it (class,
+  evidence, source, cost, how to manage it), every condition and its result, whether it is
+  inside the allowed roots or forbidden (checked on its real final path), its size on disk, every
+  name of each hard-linked file, and what deleting it would free. A file with a name outside the
+  item frees nothing. The rules live in `rules/*.toml`, are compiled into `wdc.exe`, and cover the
+  VS Code family, NVIDIA update artifacts and shader caches, Steam, Claude desktop data
+  (report-only) and Windows itself (never touched). Rules in
+  `%LOCALAPPDATA%\WinDevCleaner\rules` can explain more, but are always report-only.
+- Large folders and growth that no rule knows are flagged after a scan and in `wdc diff`.
+- `WinDevCleaner.exe` shows the tree of sizes (with a "?" to explain any folder), a "What
+  grew?" view, the system items and the latest explanation. When an AI agent connects through `wdc mcp`, the
   window shows "Agent connected: <name>", every call live in the activity panel, and "Pause
   agent" / "Disconnect agent" buttons.
 - English and Brazilian Portuguese (`--lang en|pt-BR`, or the Windows display language).
@@ -49,6 +60,7 @@ wdc scan C:\Users\me\.vscode     # specific folders
 wdc scan --json                  # stable English JSON, for scripts and agents
 wdc diff                         # what grew since the previous scan of the same folders
 wdc diff --min-mb 100 --json
+wdc explain "%USERPROFILE%\.vscode\extensions"
 wdc --lang pt-BR scan
 ```
 
@@ -61,7 +73,7 @@ claude mcp add windevcleaner -- wdc mcp
 ```
 
 Codex and other MCP clients take the same command. Tools: `scan`, `tree` (drill into a
-folder of the latest scan), `diff` (what grew) and `system_items`. The app's view follows the
+folder of the latest scan), `diff` (what grew), `explain` and `system_items`. The app's view follows the
 agent: it shows the scan, the folder, the comparison or the system items the agent is reading. With the app open, every call runs in the app while you watch; with
 it closed, `wdc mcp` runs headless (`wdc mcp --show` opens the app first).
 
@@ -87,6 +99,7 @@ Workspace:
 | `crates/wdc-app` | `WinDevCleaner.exe` (egui) |
 | `crates/wdc-testkit` | Windows fixtures and measurement helpers for tests (not shipped) |
 | `tools/wdc-bench` | the budget check (not shipped) |
+| `rules` | the rule base (TOML), compiled into the engine |
 | `installer` | the WiX v5 MSI definition |
 
 ## Languages
