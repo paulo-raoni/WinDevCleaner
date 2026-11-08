@@ -60,10 +60,27 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
     let r = mcp.call("tree", serde_json::json!({ "path": fixture.join("node_modules").to_string_lossy() }));
     assert_eq!(r["structuredContent"]["children"][0]["name"], "big-package", "{r}");
 
+    // The fixture grows; the agent scans again and asks what grew (slice 2).
+    let added = fixture.join("node_modules").join("new-package").join("dist").join("index.js");
+    std::fs::create_dir_all(added.parent().unwrap()).unwrap();
+    write_file(&added, 2 * 1024 * 1024);
+    let r = mcp.call("scan", serde_json::json!({ "roots": [fixture.to_string_lossy()] }));
+    assert_ne!(r["isError"], true, "{r}");
+    let r = mcp.call("diff", serde_json::json!({}));
+    assert_ne!(r["isError"], true, "{r}");
+    let changes = r["structuredContent"]["dirs"].as_array().unwrap().clone();
+    assert!(
+        changes.iter().any(|c| c["change"] == "new" && c["path"].as_str().unwrap().ends_with("new-package")),
+        "{changes:?}"
+    );
+    let r = mcp.call("system_items", serde_json::json!({}));
+    assert_ne!(r["isError"], true, "{r}");
+    assert!(r["structuredContent"]["items"].as_array().unwrap().iter().any(|i| i["kind"] == "recycle_bin"));
+
     // The app's activity log shows the agent and each of its calls, with the same result.
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut log = activity(&data);
-    while Instant::now() < deadline && log.len() < 5 {
+    while Instant::now() < deadline && log.iter().filter(|e| e["status"] == "done").count() < 5 {
         std::thread::sleep(Duration::from_millis(100));
         log = activity(&data);
     }
@@ -82,6 +99,14 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
         "activity-mirror",
         log.iter().any(|e| e["kind"] == "call" && e["tool"] == "tree" && e["status"] == "done"),
         "the agent's drill-down appears too"
+    );
+    let diff_done = log.iter().find(|e| e["kind"] == "call" && e["tool"] == "diff" && e["status"] == "done");
+    guard_assert!("activity-mirror", diff_done.is_some(), "the agent's diff appears in the app's activity log");
+    assert_eq!(diff_done.unwrap()["data"]["changes"].as_u64().unwrap() as usize, changes.len(), "the app shows the same diff");
+    guard_assert!(
+        "activity-mirror",
+        log.iter().any(|e| e["kind"] == "call" && e["tool"] == "system_items" && e["status"] == "done"),
+        "the agent's system items call appears too"
     );
     // The scan went through the app, not headless: it ran while the app was open and the
     // running entry came before the finished one.

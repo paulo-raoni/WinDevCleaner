@@ -33,6 +33,11 @@ CASES=(
   "pause-gate|wdc-core|pipe|a_paused_agents_calls_wait_until_resumed"
   "pipe-dacl|wdc-core|pipe|another_user_cannot_open_the_pipe"
   "activity-mirror|wdc-app|mcp_mirror|an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live"
+  "diff-new|wdc-cli|growth|diff_reports_new_grown_and_removed_folders_between_two_scans"
+  "diff-grown|wdc-cli|growth|diff_reports_new_grown_and_removed_folders_between_two_scans"
+  "snapshot-retention|wdc-cli|growth|snapshot_retention_keeps_only_the_last_ten_and_reports_their_size"
+  "recycle-bin|wdc-core|system|recycle_bin_size_comes_from_the_shell"
+  "system-file-size|wdc-core|system|paging_swap_and_hibernation_files_match_the_volume_listing"
 )
 
 run_test() { # package target name log
