@@ -314,7 +314,16 @@ pub fn draft(opts: &DraftOptions, rules: &RuleSet, ctx: &Context, data_dir: Opti
         let large_files = e
             .large_files
             .iter()
-            .filter_map(|f| crate::fsops::file_id(&native(f)).map(|id| LargeFile { path: rel(&item_path, f), file_id: id }))
+            .filter_map(|f| {
+                // The scan lists files under the item as it was given (perhaps with short names);
+                // the plan keeps them relative to the item.
+                let r = rel(&e.item, f);
+                let r = if r == canon(f) { rel(&item_path, f) } else { r };
+                if r == canon(f) {
+                    return None;
+                }
+                crate::fsops::file_id(&native(f)).map(|id| LargeFile { path: r, file_id: id })
+            })
             .collect();
         items.push(PlanItem {
             path: item_path,
