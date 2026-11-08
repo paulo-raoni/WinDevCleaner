@@ -322,6 +322,7 @@ fn the_cowork_case_two_names_one_outside_expected_freed_zero() {
     let f = Fixture::new("rule-cowork");
     let item = f.local.join("AnthropicClaude").join("vm_bundles").join("claudevm.bundle");
     let inside = item.join("rootfs.vhdx.part");
+    std::fs::create_dir_all(&item).unwrap();
     wdc_testkit::write_file(&inside, 64 * MIB as u64);
     let outside = f.local.join("Claude-Data").join("vm_bundles").join("rootfs.vhdx.part");
     std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
@@ -343,6 +344,7 @@ fn the_cowork_case_two_names_one_outside_expected_freed_zero() {
 
     // Both names inside the item: all of it is freed.
     let both = f.local.join("both");
+    std::fs::create_dir_all(&both).unwrap();
     wdc_testkit::write_file(&both.join("a.bin"), 64 * MIB as u64);
     std::fs::hard_link(both.join("a.bin"), both.join("b.bin")).unwrap();
     let e = explain(&s(&both), &rules, &f.ctx(&[], None), None);
