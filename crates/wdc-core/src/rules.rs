@@ -254,13 +254,21 @@ pub struct Context {
     pub nvidia_driver: Option<String>,
     pub now: SystemTime,
     files: RefCell<HashMap<String, Option<String>>>,
+    long: RefCell<HashMap<String, String>>,
 }
 
 impl Context {
     pub fn new(env: HashMap<String, String>, running: Option<HashSet<String>>, nvidia_driver: Option<String>) -> Context {
         let env = env.into_iter().map(|(k, v)| (k.to_uppercase(), v)).collect();
         let running = running.map(|r| r.into_iter().map(|n| n.to_lowercase()).collect());
-        Context { env, running, nvidia_driver, now: SystemTime::now(), files: RefCell::new(HashMap::new()) }
+        Context {
+            env,
+            running,
+            nvidia_driver,
+            now: SystemTime::now(),
+            files: RefCell::new(HashMap::new()),
+            long: RefCell::new(HashMap::new()),
+        }
     }
 
     /// The real machine: environment, running programs, installed driver.
@@ -283,6 +291,33 @@ impl Context {
         }
         out.push_str(rest);
         Some(out)
+    }
+
+    /// An expanded pattern with its fixed folders in the long, real form Windows gives (short
+    /// names such as `RUNNER~1` and links above the item resolved), so it matches the final
+    /// paths `apply` checks. The last name and everything from the first wildcard on are kept
+    /// as written: the item itself is never resolved.
+    pub fn long_form(&self, pattern: &str) -> String {
+        let p = canon(pattern);
+        if let Some(l) = self.long.borrow().get(&p) {
+            return l.clone();
+        }
+        let segs: Vec<&str> = p.split('\\').collect();
+        let wild = segs.iter().position(|s| s.contains('*') || s.contains('?')).unwrap_or(segs.len());
+        let fixed = wild.min(segs.len().saturating_sub(1));
+        let mut out = p.clone();
+        for k in (2..=fixed).rev() {
+            let prefix = segs[..k].join("\\");
+            if let Ok(r) = std::fs::canonicalize(native(&prefix)) {
+                let r = r.to_string_lossy().into_owned();
+                let r = canon(r.strip_prefix(r"\\?\").unwrap_or(&r));
+                let rest = &segs[k..];
+                out = if rest.is_empty() { r } else { format!("{r}\\{}", rest.join("\\")) };
+                break;
+            }
+        }
+        self.long.borrow_mut().insert(p, out.clone());
+        out
     }
 
     fn read(&self, path: &str) -> Option<String> {
@@ -655,7 +690,9 @@ impl RuleSet {
         for rule in &self.rules {
             for pattern in &rule.paths {
                 let Some(expanded) = ctx.expand(pattern) else { continue };
-                let Some(item) = item_of(&canon(&expanded), &path) else { continue };
+                let Some(item) = item_of(&canon(&expanded), &path).or_else(|| item_of(&ctx.long_form(&expanded), &path)) else {
+                    continue;
+                };
                 let match_results: Vec<CondResult> = rule.matches.iter().map(|c| eval(c, &item, ctx)).collect();
                 if !match_results.iter().all(|r| r.passed) {
                     continue;
