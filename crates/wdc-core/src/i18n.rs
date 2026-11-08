@@ -94,8 +94,8 @@ macro_rules! messages {
 messages! {
     // Command line.
     CliUsage =>
-        "WinDevCleaner {version}: find where your disk space is. Read-only in this version.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless.\n  wdc --version\n",
-        "WinDevCleaner {version}: descubra onde está o espaço do seu disco. Somente leitura nesta versão.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela.\n  wdc --version\n";
+        "WinDevCleaner {version}: find where your disk space is. Read-only in this version.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc explain PATH [--json]\n      Why a folder or file is here, the rule that knows it, and what deleting it would free.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless.\n  wdc --version\n",
+        "WinDevCleaner {version}: descubra onde está o espaço do seu disco. Somente leitura nesta versão.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc explain CAMINHO [--json]\n      Por que uma pasta ou arquivo está aqui, a regra que o conhece, e o que apagar liberaria.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela.\n  wdc --version\n";
     CliUnknownCommand =>
         "Unknown command or option: {arg}. Run `wdc --help`.",
         "Comando ou opção desconhecida: {arg}. Rode `wdc --help`.";
@@ -365,6 +365,236 @@ messages! {
     AppActSystem =>
         "reading system items",
         "lendo itens do sistema";
+
+    // Explain (slice 3).
+    FoundRunning =>
+        "running: {names}",
+        "em execução: {names}";
+    FoundNotRunning =>
+        "not running: {names}",
+        "não está em execução: {names}";
+    FoundNoProcessList =>
+        "the list of running programs is not available",
+        "a lista de programas em execução não está disponível";
+    FoundAge =>
+        "last changed {days} days ago (needs {need})",
+        "alterado há {days} dias (precisa de {need})";
+    FoundNoDate =>
+        "its date cannot be read",
+        "a data não pôde ser lida";
+    FoundListed =>
+        "listed in {file}",
+        "listado em {file}";
+    FoundNotListed =>
+        "not listed in {file}",
+        "não listado em {file}";
+    FoundReferenced =>
+        "referenced by {file}",
+        "referenciado por {file}";
+    FoundNotReferenced =>
+        "not referenced by {file}",
+        "não referenciado por {file}";
+    FoundFileMissing =>
+        "{file} not found",
+        "{file} não encontrado";
+    FoundBadFile =>
+        "{file} could not be read",
+        "{file} não pôde ser lido";
+    FoundVarMissing =>
+        "{file}: a variable is not set",
+        "{file}: uma variável não está definida";
+    FoundNameMatches =>
+        "the name matches {pattern}",
+        "o nome corresponde a {pattern}";
+    FoundNameDiffers =>
+        "the name does not match {pattern}",
+        "o nome não corresponde a {pattern}";
+    FoundDriverOlder =>
+        "artifact {a} is older than the installed driver {i}",
+        "o artefato {a} é anterior ao driver instalado {i}";
+    FoundDriverEqual =>
+        "artifact {a} is the installed driver {i}",
+        "o artefato {a} é o driver instalado {i}";
+    FoundDriverNewer =>
+        "artifact {a} is newer than the installed driver {i}: it may be a pending update",
+        "o artefato {a} é mais novo que o driver instalado {i}: pode ser uma atualização pendente";
+    FoundNoDriver =>
+        "no installed NVIDIA driver found",
+        "nenhum driver NVIDIA instalado encontrado";
+    FoundNoArtifactVersion =>
+        "no driver version found in the artifact",
+        "nenhuma versão de driver encontrada no artefato";
+    FoundUnsupported =>
+        "not supported: {what}",
+        "não suportado: {what}";
+    ForbidVolumeRoot =>
+        "the volume root",
+        "a raiz do volume";
+    ForbidWindows =>
+        "Windows",
+        "o Windows";
+    ForbidProgramFiles =>
+        "Program Files: programs are removed only by their own uninstaller",
+        "Arquivos de Programas: programas só saem pelo próprio desinstalador";
+    ForbidUserProfile =>
+        "the user profile itself",
+        "a própria pasta do usuário";
+    ForbidPersonalFolder =>
+        "a personal folder (Documents, Desktop, Pictures, Videos, Music, Downloads)",
+        "uma pasta pessoal (Documentos, Área de Trabalho, Imagens, Vídeos, Músicas, Downloads)";
+    ForbidOneDrive =>
+        "OneDrive",
+        "OneDrive";
+    ForbidSecrets =>
+        "secrets (keys, credentials, SSH, GnuPG)",
+        "segredos (chaves, credenciais, SSH, GnuPG)";
+    ForbidVirtualDisk =>
+        "a virtual disk or mailbox file (VHD, VHDX, PST, OST)",
+        "um disco virtual ou arquivo de e-mail (VHD, VHDX, PST, OST)";
+    ForbidMessenger =>
+        "messenger data",
+        "dados de mensageiros";
+    ForbidBrowserProfile =>
+        "browser profile data (only named cache folders may be touched)",
+        "dados de perfil do navegador (só pastas de cache nomeadas podem ser tocadas)";
+    ForbidQuarantine =>
+        "the quarantine folder",
+        "a pasta de quarentena";
+    ForbidGit =>
+        "a folder with a Git repository",
+        "uma pasta com um repositório Git";
+    WhyNoRule =>
+        "no rule knows this path",
+        "nenhuma regra conhece este caminho";
+    WhyLocalRule =>
+        "only built-in rules can make an item actionable; this is a local rule",
+        "só regras embutidas podem tornar um item agível; esta é uma regra local";
+    WhyReportOnly =>
+        "the rule is report-only",
+        "a regra é só de relatório";
+    WhyAppManaged =>
+        "the app manages it: use its own setting",
+        "o app o gerencia: use a configuração dele";
+    WhyNeverTouch =>
+        "never touched",
+        "nunca é tocado";
+    WhyCondition =>
+        "condition not met: {found}",
+        "condição não atendida: {found}";
+    WhyMissing =>
+        "it does not exist",
+        "não existe";
+    WhyIsLink =>
+        "it is a link: links are never items",
+        "é um link: links nunca são itens";
+    WhyAllowedRoot =>
+        "an allowed root itself is never an item",
+        "uma raiz permitida nunca é um item";
+    WhyOutsideRoots =>
+        "outside the allowed roots",
+        "fora das raízes permitidas";
+    WhyForbidden =>
+        "forbidden: {why}",
+        "proibido: {why}";
+    ClassRegenerableCache =>
+        "regenerable cache",
+        "cache regenerável";
+    ClassInstallLeftover =>
+        "install leftover",
+        "sobra de instalação";
+    ClassAppManaged =>
+        "managed by its app",
+        "gerenciado pelo app";
+    ClassNeverTouch =>
+        "never touch",
+        "nunca tocar";
+    ActionQuarantine =>
+        "can go to quarantine",
+        "pode ir para a quarentena";
+    ActionReportOnly =>
+        "report only",
+        "só relatório";
+    ActionOpenAppSetting =>
+        "use the app's own setting",
+        "use a configuração do app";
+    KindFolder =>
+        "folder",
+        "pasta";
+    KindFile =>
+        "file",
+        "arquivo";
+    KindMissing =>
+        "does not exist",
+        "não existe";
+    KindLink =>
+        "link",
+        "link";
+    ExplainItem =>
+        "{item} ({kind})",
+        "{item} ({kind})";
+    ExplainInside =>
+        "{path} is inside this item.",
+        "{path} está dentro deste item.";
+    ExplainSize =>
+        "Size on disk: {size} in {files} files.",
+        "Tamanho em disco: {size} em {files} arquivos.";
+    ExplainFreed =>
+        "Deleting it would free: {size}.",
+        "Apagar liberaria: {size}.";
+    ExplainLinked =>
+        "{size} has {n} names; while one is outside this item, deleting it frees nothing of that file:",
+        "{size} tem {n} nomes; enquanto um estiver fora deste item, apagar não libera nada desse arquivo:";
+    ExplainOutside =>
+        "(outside this item)",
+        "(fora deste item)";
+    ExplainRule =>
+        "Rule: {title} ({class}; {action}).",
+        "Regra: {title} ({class}; {action}).";
+    ExplainLocalRuleNote =>
+        "Local rule from {file}: always report-only.",
+        "Regra local de {file}: sempre só relatório.";
+    ExplainUnknown =>
+        "No rule knows this path. It is reported, never actionable; an agent can investigate it and propose a rule with its evidence.",
+        "Nenhuma regra conhece este caminho. Ele é relatado, nunca agido; um agente pode investigar e propor uma regra com a evidência.";
+    ExplainEvidence =>
+        "Why it is here: {text}",
+        "Por que está aqui: {text}";
+    ExplainSource =>
+        "Source: {text}",
+        "Fonte: {text}";
+    ExplainCost =>
+        "Cost of removing it: {text}",
+        "Custo de remover: {text}";
+    ExplainHow =>
+        "How to manage it: {text}",
+        "Como gerenciar: {text}";
+    ExplainConditions =>
+        "Conditions:",
+        "Condições:";
+    ExplainActionable =>
+        "Actionable: yes. A plan (slice 4) could include it; nothing is changed now.",
+        "Pode ser agido: sim. Um plano (slice 4) poderia incluí-lo; nada é alterado agora.";
+    ExplainNotActionable =>
+        "Actionable: no.",
+        "Pode ser agido: não.";
+    ExplainScope =>
+        "Allowed root: {root}",
+        "Raiz permitida: {root}";
+    CliUnknownLarge =>
+        "Large folders no rule knows (an agent can investigate them and propose a rule):",
+        "Pastas grandes que nenhuma regra conhece (um agente pode investigar e propor uma regra):";
+    DiffUnknownTag =>
+        "no rule knows it",
+        "nenhuma regra conhece";
+    AppTabExplain =>
+        "Explain",
+        "Explicar";
+    AppExplainNone =>
+        "Nothing explained yet. Press “?” next to a folder, or let an agent explain one.",
+        "Nada explicado ainda. Clique em “?” ao lado de uma pasta, ou deixe um agente explicar uma.";
+    AppActExplain =>
+        "explaining {path}",
+        "explicando {path}";
 }
 
 

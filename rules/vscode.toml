@@ -1,0 +1,356 @@
+# VS Code family (plan, section 4.2): VS Code, VS Code Insiders, Cursor, and the C/C++
+# extension's IntelliSense cache. Rules are data reviewed like code and compiled into wdc.exe.
+#
+# A rule applies to an item when its path pattern matches and every `match` condition passes;
+# the item is eligible when every `require` condition passes too. Patterns use environment
+# variables, `*` inside one folder name, and a final `**` for a whole tree.
+#
+# Only the top-level folder names were checked on the owner's machine (2026-11-07); exact
+# patterns are confirmed there before slice 4 lets any of them act.
+
+[[rule]]
+id = "vscode-obsolete-extension"
+title = "VS Code obsolete extension"
+title_pt_br = "Extensão obsoleta do VS Code"
+class = "install-leftover"
+action = "quarantine"
+paths = ['%USERPROFILE%\.vscode\extensions\*']
+evidence = "VS Code lists extension folders it will remove in `extensions\\.obsolete`, and often does not finish. A folder listed there that `extensions.json` no longer references is a leftover of an update or uninstall."
+evidence_pt_br = "O VS Code lista em `extensions\\.obsolete` as pastas de extensões que vai remover, e muitas vezes não termina. Uma pasta listada ali que o `extensions.json` não referencia mais é sobra de uma atualização ou desinstalação."
+source = "Observed on the owner's machine on 2026-11-07: about 6 GB of `.obsolete` entries and staging folders."
+cost = "None: VS Code already replaced or removed this extension."
+cost_pt_br = "Nenhum: o VS Code já substituiu ou removeu esta extensão."
+last_verified = "2026-11-07"
+
+[[rule.match]]
+kind = "listed-in-file"
+file = '%USERPROFILE%\.vscode\extensions\.obsolete'
+format = "json-object-keys"
+
+[[rule.require]]
+kind = "not-referenced-by"
+file = '%USERPROFILE%\.vscode\extensions\extensions.json'
+format = "vscode-extensions-json"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Code.exe"]
+
+[[rule]]
+id = "vscode-staging-folder"
+title = "VS Code interrupted extension install"
+title_pt_br = "Instalação interrompida de extensão do VS Code"
+class = "install-leftover"
+action = "quarantine"
+paths = ['%USERPROFILE%\.vscode\extensions\*']
+evidence = "Folders named like a GUID in `extensions` are extraction folders of extension installs. One older than a day that `extensions.json` does not reference was left by an install that did not finish."
+evidence_pt_br = "Pastas com nome de GUID em `extensions` são pastas de extração de instalações de extensões. Uma com mais de um dia que o `extensions.json` não referencia sobrou de uma instalação que não terminou."
+source = "Observed on the owner's machine on 2026-11-07 (hidden GUID-named folders in `.vscode\\extensions`)."
+cost = "None: the install it belonged to did not complete."
+cost_pt_br = "Nenhum: a instalação a que pertencia não terminou."
+last_verified = "2026-11-07"
+
+[[rule.match]]
+kind = "name-matches-regex"
+pattern = '^\.?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+[[rule.require]]
+kind = "older-than"
+days = 1
+
+[[rule.require]]
+kind = "not-referenced-by"
+file = '%USERPROFILE%\.vscode\extensions\extensions.json'
+format = "vscode-extensions-json"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Code.exe"]
+
+[[rule]]
+id = "vscode-installed-extension"
+title = "VS Code extension"
+title_pt_br = "Extensão do VS Code"
+class = "app-managed"
+action = "open-app-setting"
+paths = ['%USERPROFILE%\.vscode\extensions\*']
+evidence = "An extension folder that is not listed as obsolete: an installed extension, or one VS Code still manages."
+evidence_pt_br = "Uma pasta de extensão que não está listada como obsoleta: uma extensão instalada, ou que o VS Code ainda gerencia."
+source = "VS Code extension layout."
+cost = "Removing it by hand breaks the extension."
+cost_pt_br = "Removê-la à mão quebra a extensão."
+instructions = "Uninstall it from the Extensions view of VS Code."
+instructions_pt_br = "Desinstale pela visão Extensões do VS Code."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "vscode-caches"
+title = "VS Code caches"
+title_pt_br = "Caches do VS Code"
+class = "regenerable-cache"
+action = "quarantine"
+paths = ['%APPDATA%\Code\Cache', '%APPDATA%\Code\CachedData', '%APPDATA%\Code\CachedExtensionVSIXs', '%APPDATA%\Code\Code Cache', '%APPDATA%\Code\GPUCache']
+evidence = "Chromium and VS Code caches: VS Code rebuilds them on its next start."
+evidence_pt_br = "Caches do Chromium e do VS Code: o VS Code os reconstrói na próxima vez que abre."
+source = "Electron cache layout; observed on the owner's machine on 2026-11-07."
+cost = "VS Code starts a little slower once; downloaded extension packages are fetched again when needed."
+cost_pt_br = "O VS Code abre um pouco mais devagar uma vez; pacotes de extensões baixados são baixados de novo quando preciso."
+last_verified = "2026-11-07"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Code.exe"]
+
+[[rule]]
+id = "vscode-workspace-storage"
+title = "VS Code workspace storage"
+title_pt_br = "Armazenamento de workspaces do VS Code"
+class = "app-managed"
+action = "report-only"
+paths = ['%APPDATA%\Code\User\workspaceStorage']
+evidence = "Per-workspace state (open editors, local history, extension data). Not a cache: losing it loses that state."
+evidence_pt_br = "Estado de cada workspace (editores abertos, histórico local, dados de extensões). Não é cache: apagar perde esse estado."
+source = "VS Code user data layout."
+cost = "The state of every workspace."
+cost_pt_br = "O estado de cada workspace."
+instructions = "Folders of workspaces you no longer use can be removed from inside VS Code by reopening and closing them; report-only here."
+instructions_pt_br = "Pastas de workspaces que você não usa mais podem ser removidas pelo próprio VS Code; aqui é só relatório."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "vscode-insiders-obsolete-extension"
+title = "VS Code Insiders obsolete extension"
+title_pt_br = "Extensão obsoleta do VS Code Insiders"
+class = "install-leftover"
+action = "quarantine"
+paths = ['%USERPROFILE%\.vscode-insiders\extensions\*']
+evidence = "VS Code Insiders lists extension folders it will remove in `extensions\\.obsolete`, and often does not finish. A folder listed there that `extensions.json` no longer references is a leftover of an update or uninstall."
+evidence_pt_br = "O VS Code Insiders lista em `extensions\\.obsolete` as pastas de extensões que vai remover, e muitas vezes não termina. Uma pasta listada ali que o `extensions.json` não referencia mais é sobra de uma atualização ou desinstalação."
+source = "Observed on the owner's machine on 2026-11-07: about 6 GB of `.obsolete` entries and staging folders."
+cost = "None: VS Code Insiders already replaced or removed this extension."
+cost_pt_br = "Nenhum: o VS Code Insiders já substituiu ou removeu esta extensão."
+last_verified = "2026-11-07"
+
+[[rule.match]]
+kind = "listed-in-file"
+file = '%USERPROFILE%\.vscode-insiders\extensions\.obsolete'
+format = "json-object-keys"
+
+[[rule.require]]
+kind = "not-referenced-by"
+file = '%USERPROFILE%\.vscode-insiders\extensions\extensions.json'
+format = "vscode-extensions-json"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Code - Insiders.exe"]
+
+[[rule]]
+id = "vscode-insiders-staging-folder"
+title = "VS Code Insiders interrupted extension install"
+title_pt_br = "Instalação interrompida de extensão do VS Code Insiders"
+class = "install-leftover"
+action = "quarantine"
+paths = ['%USERPROFILE%\.vscode-insiders\extensions\*']
+evidence = "Folders named like a GUID in `extensions` are extraction folders of extension installs. One older than a day that `extensions.json` does not reference was left by an install that did not finish."
+evidence_pt_br = "Pastas com nome de GUID em `extensions` são pastas de extração de instalações de extensões. Uma com mais de um dia que o `extensions.json` não referencia sobrou de uma instalação que não terminou."
+source = "Observed on the owner's machine on 2026-11-07 (hidden GUID-named folders in `.vscode\\extensions`)."
+cost = "None: the install it belonged to did not complete."
+cost_pt_br = "Nenhum: a instalação a que pertencia não terminou."
+last_verified = "2026-11-07"
+
+[[rule.match]]
+kind = "name-matches-regex"
+pattern = '^\.?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+[[rule.require]]
+kind = "older-than"
+days = 1
+
+[[rule.require]]
+kind = "not-referenced-by"
+file = '%USERPROFILE%\.vscode-insiders\extensions\extensions.json'
+format = "vscode-extensions-json"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Code - Insiders.exe"]
+
+[[rule]]
+id = "vscode-insiders-installed-extension"
+title = "VS Code Insiders extension"
+title_pt_br = "Extensão do VS Code Insiders"
+class = "app-managed"
+action = "open-app-setting"
+paths = ['%USERPROFILE%\.vscode-insiders\extensions\*']
+evidence = "An extension folder that is not listed as obsolete: an installed extension, or one VS Code Insiders still manages."
+evidence_pt_br = "Uma pasta de extensão que não está listada como obsoleta: uma extensão instalada, ou que o VS Code Insiders ainda gerencia."
+source = "VS Code extension layout."
+cost = "Removing it by hand breaks the extension."
+cost_pt_br = "Removê-la à mão quebra a extensão."
+instructions = "Uninstall it from the Extensions view of VS Code Insiders."
+instructions_pt_br = "Desinstale pela visão Extensões do VS Code Insiders."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "vscode-insiders-caches"
+title = "VS Code Insiders caches"
+title_pt_br = "Caches do VS Code Insiders"
+class = "regenerable-cache"
+action = "quarantine"
+paths = ['%APPDATA%\Code - Insiders\Cache', '%APPDATA%\Code - Insiders\CachedData', '%APPDATA%\Code - Insiders\CachedExtensionVSIXs', '%APPDATA%\Code - Insiders\Code Cache', '%APPDATA%\Code - Insiders\GPUCache']
+evidence = "Chromium and VS Code Insiders caches: VS Code Insiders rebuilds them on its next start."
+evidence_pt_br = "Caches do Chromium e do VS Code Insiders: o VS Code Insiders os reconstrói na próxima vez que abre."
+source = "Electron cache layout; observed on the owner's machine on 2026-11-07."
+cost = "VS Code Insiders starts a little slower once; downloaded extension packages are fetched again when needed."
+cost_pt_br = "O VS Code Insiders abre um pouco mais devagar uma vez; pacotes de extensões baixados são baixados de novo quando preciso."
+last_verified = "2026-11-07"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Code - Insiders.exe"]
+
+[[rule]]
+id = "vscode-insiders-workspace-storage"
+title = "VS Code Insiders workspace storage"
+title_pt_br = "Armazenamento de workspaces do VS Code Insiders"
+class = "app-managed"
+action = "report-only"
+paths = ['%APPDATA%\Code - Insiders\User\workspaceStorage']
+evidence = "Per-workspace state (open editors, local history, extension data). Not a cache: losing it loses that state."
+evidence_pt_br = "Estado de cada workspace (editores abertos, histórico local, dados de extensões). Não é cache: apagar perde esse estado."
+source = "VS Code user data layout."
+cost = "The state of every workspace."
+cost_pt_br = "O estado de cada workspace."
+instructions = "Folders of workspaces you no longer use can be removed from inside VS Code Insiders by reopening and closing them; report-only here."
+instructions_pt_br = "Pastas de workspaces que você não usa mais podem ser removidas pelo próprio VS Code Insiders; aqui é só relatório."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "cursor-obsolete-extension"
+title = "Cursor obsolete extension"
+title_pt_br = "Extensão obsoleta do Cursor"
+class = "install-leftover"
+action = "quarantine"
+paths = ['%USERPROFILE%\.cursor\extensions\*']
+evidence = "Cursor lists extension folders it will remove in `extensions\\.obsolete`, and often does not finish. A folder listed there that `extensions.json` no longer references is a leftover of an update or uninstall."
+evidence_pt_br = "O Cursor lista em `extensions\\.obsolete` as pastas de extensões que vai remover, e muitas vezes não termina. Uma pasta listada ali que o `extensions.json` não referencia mais é sobra de uma atualização ou desinstalação."
+source = "Observed on the owner's machine on 2026-11-07: about 6 GB of `.obsolete` entries and staging folders."
+cost = "None: Cursor already replaced or removed this extension."
+cost_pt_br = "Nenhum: o Cursor já substituiu ou removeu esta extensão."
+last_verified = "2026-11-07"
+
+[[rule.match]]
+kind = "listed-in-file"
+file = '%USERPROFILE%\.cursor\extensions\.obsolete'
+format = "json-object-keys"
+
+[[rule.require]]
+kind = "not-referenced-by"
+file = '%USERPROFILE%\.cursor\extensions\extensions.json'
+format = "vscode-extensions-json"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Cursor.exe"]
+
+[[rule]]
+id = "cursor-staging-folder"
+title = "Cursor interrupted extension install"
+title_pt_br = "Instalação interrompida de extensão do Cursor"
+class = "install-leftover"
+action = "quarantine"
+paths = ['%USERPROFILE%\.cursor\extensions\*']
+evidence = "Folders named like a GUID in `extensions` are extraction folders of extension installs. One older than a day that `extensions.json` does not reference was left by an install that did not finish."
+evidence_pt_br = "Pastas com nome de GUID em `extensions` são pastas de extração de instalações de extensões. Uma com mais de um dia que o `extensions.json` não referencia sobrou de uma instalação que não terminou."
+source = "Observed on the owner's machine on 2026-11-07 (hidden GUID-named folders in `.vscode\\extensions`)."
+cost = "None: the install it belonged to did not complete."
+cost_pt_br = "Nenhum: a instalação a que pertencia não terminou."
+last_verified = "2026-11-07"
+
+[[rule.match]]
+kind = "name-matches-regex"
+pattern = '^\.?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
+[[rule.require]]
+kind = "older-than"
+days = 1
+
+[[rule.require]]
+kind = "not-referenced-by"
+file = '%USERPROFILE%\.cursor\extensions\extensions.json'
+format = "vscode-extensions-json"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Cursor.exe"]
+
+[[rule]]
+id = "cursor-installed-extension"
+title = "Cursor extension"
+title_pt_br = "Extensão do Cursor"
+class = "app-managed"
+action = "open-app-setting"
+paths = ['%USERPROFILE%\.cursor\extensions\*']
+evidence = "An extension folder that is not listed as obsolete: an installed extension, or one Cursor still manages."
+evidence_pt_br = "Uma pasta de extensão que não está listada como obsoleta: uma extensão instalada, ou que o Cursor ainda gerencia."
+source = "VS Code extension layout."
+cost = "Removing it by hand breaks the extension."
+cost_pt_br = "Removê-la à mão quebra a extensão."
+instructions = "Uninstall it from the Extensions view of Cursor."
+instructions_pt_br = "Desinstale pela visão Extensões do Cursor."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "cursor-caches"
+title = "Cursor caches"
+title_pt_br = "Caches do Cursor"
+class = "regenerable-cache"
+action = "quarantine"
+paths = ['%APPDATA%\Cursor\Cache', '%APPDATA%\Cursor\CachedData', '%APPDATA%\Cursor\CachedExtensionVSIXs', '%APPDATA%\Cursor\Code Cache', '%APPDATA%\Cursor\GPUCache']
+evidence = "Chromium and Cursor caches: Cursor rebuilds them on its next start."
+evidence_pt_br = "Caches do Chromium e do Cursor: o Cursor os reconstrói na próxima vez que abre."
+source = "Electron cache layout; observed on the owner's machine on 2026-11-07."
+cost = "Cursor starts a little slower once; downloaded extension packages are fetched again when needed."
+cost_pt_br = "O Cursor abre um pouco mais devagar uma vez; pacotes de extensões baixados são baixados de novo quando preciso."
+last_verified = "2026-11-07"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Cursor.exe"]
+
+[[rule]]
+id = "cursor-workspace-storage"
+title = "Cursor workspace storage"
+title_pt_br = "Armazenamento de workspaces do Cursor"
+class = "app-managed"
+action = "report-only"
+paths = ['%APPDATA%\Cursor\User\workspaceStorage']
+evidence = "Per-workspace state (open editors, local history, extension data). Not a cache: losing it loses that state."
+evidence_pt_br = "Estado de cada workspace (editores abertos, histórico local, dados de extensões). Não é cache: apagar perde esse estado."
+source = "VS Code user data layout."
+cost = "The state of every workspace."
+cost_pt_br = "O estado de cada workspace."
+instructions = "Folders of workspaces you no longer use can be removed from inside Cursor by reopening and closing them; report-only here."
+instructions_pt_br = "Pastas de workspaces que você não usa mais podem ser removidas pelo próprio Cursor; aqui é só relatório."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "cpptools-ipch"
+title = "C/C++ extension IntelliSense cache"
+title_pt_br = "Cache do IntelliSense da extensão C/C++"
+class = "regenerable-cache"
+action = "quarantine"
+paths = ['%LOCALAPPDATA%\Microsoft\vscode-cpptools\ipch']
+evidence = "Precompiled headers of the C/C++ extension; rebuilt when a project is opened again."
+evidence_pt_br = "Cabeçalhos pré-compilados da extensão C/C++; reconstruídos quando um projeto é aberto de novo."
+source = "C/C++ extension documentation (C_Cpp.intelliSenseCachePath)."
+cost = "The first IntelliSense of each project is slower once."
+cost_pt_br = "O primeiro IntelliSense de cada projeto fica mais lento uma vez."
+instructions = "The extension also limits it with the setting `C_Cpp.intelliSenseCacheSize`."
+instructions_pt_br = "A extensão também limita o tamanho com a configuração `C_Cpp.intelliSenseCacheSize`."
+last_verified = "2026-11-07"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["Code.exe", "Code - Insiders.exe", "Cursor.exe"]

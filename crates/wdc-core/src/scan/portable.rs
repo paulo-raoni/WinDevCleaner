@@ -71,6 +71,14 @@ impl Walker {
                     continue;
                 }
                 let mut on_disk = md.blocks() * 512;
+                if c.collect_large && on_disk >= DEDUP_THRESHOLD {
+                    c.large.push(TopFile {
+                        path: full.to_string_lossy().into_owned(),
+                        bytes_on_disk: on_disk,
+                        logical_bytes: md.len(),
+                        links: md.nlink() as u32,
+                    });
+                }
                 if on_disk >= DEDUP_THRESHOLD && !seen.insert((md.dev(), md.ino())) {
                     c.totals.hardlink_duplicates += 1;
                     on_disk = 0;

@@ -32,6 +32,12 @@ pub struct DirChange {
     pub delta_bytes: i64,
     pub old_files: u64,
     pub new_files: u64,
+    /// The rule that knows this folder, if any.
+    #[serde(default)]
+    pub rule: Option<String>,
+    /// No rule knows this folder: it is what an agent investigates next.
+    #[serde(default)]
+    pub unknown: bool,
 }
 
 /// A large file that is new among the largest files, or grew.
@@ -175,6 +181,8 @@ pub fn diff(old_path: &str, old: &Snapshot, new_path: &str, new: &Snapshot, opts
             delta_bytes: dd,
             old_files: old_d.map(|o| o.files).unwrap_or(0),
             new_files: d.files,
+            rule: None,
+            unknown: false,
         });
     }
     for (k, o) in &old_dirs {
@@ -192,6 +200,8 @@ pub fn diff(old_path: &str, old: &Snapshot, new_path: &str, new: &Snapshot, opts
                 delta_bytes: -(o.bytes_on_disk as i64),
                 old_files: o.files,
                 new_files: 0,
+                rule: None,
+                unknown: false,
             });
         }
     }
@@ -236,6 +246,16 @@ pub fn diff(old_path: &str, old: &Snapshot, new_path: &str, new: &Snapshot, opts
         files,
         more,
         min_bytes: opts.min_bytes,
+    }
+}
+
+impl Diff {
+    /// Names the rule that knows each grown or new folder, and flags the ones no rule knows.
+    pub fn annotate(&mut self, rules: &crate::rules::RuleSet, ctx: &crate::rules::Context) {
+        for c in self.dirs.iter_mut() {
+            c.rule = rules.covers(&c.path, ctx);
+            c.unknown = c.rule.is_none() && c.delta_bytes > 0;
+        }
     }
 }
 

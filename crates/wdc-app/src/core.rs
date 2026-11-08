@@ -42,6 +42,7 @@ pub enum View {
     Space,
     Growth,
     System,
+    Explain,
 }
 
 #[derive(Default)]
@@ -50,6 +51,7 @@ pub struct Shared {
     /// The latest comparison with the previous scan of the same folders, or why there is none.
     pub diff: Option<Result<Arc<wdc_core::diff::Diff>, String>>,
     pub system: Option<Arc<Vec<wdc_core::system::SystemItem>>>,
+    pub explanation: Option<Arc<wdc_core::explain::Explanation>>,
     pub loaded: Option<Loaded>,
     pub scanning: Option<ScanProgress>,
     /// Folder the view should show, and a counter so the view knows it changed. When an agent
@@ -156,6 +158,23 @@ impl AppCore {
             .ok();
     }
 
+    /// Explains a folder for the human (the "?" next to it in the tree).
+    pub fn start_explain(self: &Arc<Self>, path: String) {
+        let me = self.clone();
+        std::thread::Builder::new()
+            .name("explain".into())
+            .spawn(move || {
+                let _background = wdc_core::background::ThreadBackground::enter();
+                let e = tools::run_explain(&path, &me.data_dir);
+                let mut s = me.shared.lock().unwrap();
+                s.explanation = Some(Arc::new(e));
+                s.view = View::Explain;
+                drop(s);
+                me.ctx.request_repaint();
+            })
+            .ok();
+    }
+
     pub fn set_view(&self, v: View) {
         self.shared.lock().unwrap().view = v;
         self.ctx.request_repaint();
@@ -194,6 +213,7 @@ fn call_target(tool: &str, args: &Value) -> String {
         tools::SCAN => tools::parse_scan_args(args).map(|a| a.target).unwrap_or_default(),
         tools::TREE => args.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
         tools::DIFF | tools::SYSTEM_ITEMS => String::new(),
+        tools::EXPLAIN => args.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
         _ => String::new(),
     }
 }
@@ -275,6 +295,20 @@ impl AgentHandler for AppCore {
                 self.ctx.request_repaint();
                 Ok(value)
             }
+            tools::EXPLAIN => {
+                let path = tools::parse_explain_args(args)?;
+                let _background = wdc_core::background::ThreadBackground::enter();
+                let e = tools::run_explain(&path, &self.data_dir);
+                let value = serde_json::to_value(&e).map_err(|e| e.to_string());
+                {
+                    // The window shows the explanation the agent is reading.
+                    let mut s = self.shared.lock().unwrap();
+                    s.explanation = Some(Arc::new(e));
+                    s.view = View::Explain;
+                }
+                self.ctx.request_repaint();
+                value
+            }
             other => Err(format!("unknown tool `{other}`")),
         }
     }
@@ -290,6 +324,8 @@ impl AgentHandler for AppCore {
                         Msg::AppActScanResult,
                         &[("size", &wdc_core::fmt::bytes(bytes)), ("files", &wdc_core::fmt::count(files))],
                     )
+                } else if let Some(freed) = v.get("expected_freed_bytes").and_then(Value::as_u64) {
+                    lang.fmt(Msg::ExplainFreed, &[("size", &wdc_core::fmt::bytes(freed))])
                 } else if let Some(delta) = v.get("delta_bytes").and_then(Value::as_i64) {
                     let sign = if delta < 0 { "-" } else { "+" };
                     format!("{sign}{}", wdc_core::fmt::bytes(delta.unsigned_abs()))
@@ -302,6 +338,12 @@ impl AgentHandler for AppCore {
                 };
                 let data = if !totals.is_null() {
                     Some(serde_json::json!({ "totals": totals }))
+                } else if v.get("expected_freed_bytes").is_some() {
+                    Some(serde_json::json!({
+                        "expected_freed_bytes": v["expected_freed_bytes"],
+                        "rule": v["rule"]["id"],
+                        "actionable": v["actionable"],
+                    }))
                 } else if v.get("delta_bytes").is_some() {
                     Some(serde_json::json!({
                         "delta_bytes": v["delta_bytes"],

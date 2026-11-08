@@ -40,11 +40,13 @@ pub struct ScanOptions {
     pub throttle: Option<Duration>,
     /// How many of the largest files to keep.
     pub top_files: usize,
+    /// Also list every file of at least 1 MB (for `explain`, on one item's small tree).
+    pub collect_large: bool,
 }
 
 impl Default for ScanOptions {
     fn default() -> Self {
-        ScanOptions { roots: Vec::new(), excluded: Vec::new(), throttle: None, top_files: 50 }
+        ScanOptions { roots: Vec::new(), excluded: Vec::new(), throttle: None, top_files: 50, collect_large: false }
     }
 }
 
@@ -175,6 +177,9 @@ pub struct ScanReport {
     pub errors: Vec<ScanError>,
     pub excluded: Vec<String>,
     pub cancelled: bool,
+    /// Every file of at least 1 MB, when asked for (`ScanOptions::collect_large`).
+    #[serde(skip)]
+    pub large_files: Vec<TopFile>,
 }
 
 /// Records kept while walking; shared by the platform walkers.
@@ -186,6 +191,8 @@ pub(crate) struct Collector<'a> {
     pub totals: Totals,
     top: BinaryHeap<Reverse<TopFile>>,
     top_n: usize,
+    pub collect_large: bool,
+    pub large: Vec<TopFile>,
     progress: Option<&'a mut dyn FnMut(&Progress)>,
     last_progress: Instant,
     pub cancel: Option<&'a AtomicBool>,
@@ -312,6 +319,8 @@ pub fn scan<'a>(
         totals: Totals::default(),
         top: BinaryHeap::new(),
         top_n: options.top_files,
+        collect_large: options.collect_large,
+        large: Vec::new(),
         progress,
         last_progress: Instant::now(),
         cancel,
@@ -367,6 +376,7 @@ pub fn scan<'a>(
         errors: c.errors,
         excluded: c.excluded_paths,
         cancelled,
+        large_files: c.large,
     }
 }
 
@@ -532,6 +542,8 @@ mod tests {
             totals: Totals::default(),
             top: BinaryHeap::new(),
             top_n: 2,
+            collect_large: false,
+            large: Vec::new(),
             progress: None,
             last_progress: Instant::now(),
             cancel: None,
@@ -580,6 +592,7 @@ mod tests {
             errors: vec![],
             excluded: vec![],
             cancelled: false,
+            large_files: vec![],
         }
     }
 

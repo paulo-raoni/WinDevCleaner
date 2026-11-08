@@ -21,6 +21,10 @@ pub const SCAN: &str = "scan";
 pub const TREE: &str = "tree";
 pub const DIFF: &str = "diff";
 pub const SYSTEM_ITEMS: &str = "system_items";
+pub const EXPLAIN: &str = "explain";
+
+/// Folders at least this large that no rule knows are flagged after a scan.
+pub const UNKNOWN_LARGE_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub fn specs() -> Vec<ToolSpec> {
     vec![
@@ -79,6 +83,22 @@ pub fn specs() -> Vec<ToolSpec> {
                         "limit": { "type": "integer", "minimum": 1, "maximum": 1000,
                                    "description": "Most folders shown (default 50)." }
                     },
+                    "additionalProperties": false
+                })
+            },
+        },
+        ToolSpec {
+            name: EXPLAIN,
+            description: "Why a folder or file is here and what deleting it would free. Reports the rule that knows \
+                it (class, evidence, source, cost, how to manage it), every condition with its result, whether it \
+                is inside the allowed roots or forbidden (checked on its real final path), its size on disk, and \
+                every name of each hard-linked file: a file with a name outside the item frees 0 bytes. \
+                Read-only. When the app is open, the app shows the same explanation.",
+            schema: || {
+                json!({
+                    "type": "object",
+                    "properties": { "path": { "type": "string", "description": "A folder or file." } },
+                    "required": ["path"],
                     "additionalProperties": false
                 })
             },
@@ -168,7 +188,37 @@ pub fn run_scan<'a>(
     if args.default_scope {
         summary["system_items"] = serde_json::to_value(crate::system::system_items()).unwrap_or(Value::Null);
     }
+    // Rules: what each large folder is, and the large folders no rule knows.
+    let rules = crate::rules::RuleSet::with_local(data_dir);
+    let ctx = crate::rules::Context::system();
+    if let Some(list) = summary["largest_dirs"].as_array_mut() {
+        for d in list.iter_mut() {
+            let path = d["path"].as_str().unwrap_or_default().to_string();
+            d["rule"] = rules.covers(&path, &ctx).map(Value::from).unwrap_or(Value::Null);
+        }
+    }
+    summary["unknown_large"] = crate::explain::unknown_large(&report, &rules, &ctx, UNKNOWN_LARGE_BYTES)
+        .into_iter()
+        .take(20)
+        .map(|(path, bytes)| json!({ "path": path, "bytes_on_disk": bytes }))
+        .collect();
     (report, summary)
+}
+
+/// Parsed arguments of `explain`.
+pub fn parse_explain_args(args: &Value) -> Result<String, String> {
+    let path = args.get("path").and_then(Value::as_str).ok_or("`path` is required")?;
+    if path.trim().is_empty() {
+        return Err("`path` is empty".into());
+    }
+    Ok(path.to_string())
+}
+
+/// `explain`: built-in and local rules, conditions read from this machine.
+pub fn run_explain(path: &str, data_dir: &Path) -> crate::explain::Explanation {
+    let rules = crate::rules::RuleSet::with_local(data_dir);
+    let ctx = crate::rules::Context::system();
+    crate::explain::explain(path, &rules, &ctx, Some(&data_dir.to_string_lossy()))
 }
 
 /// Parsed arguments of `diff`.
@@ -195,7 +245,9 @@ pub fn parse_diff_args(args: &Value) -> Result<crate::diff::DiffOptions, String>
 
 /// `diff`: what grew between the last two scans of the same folders.
 pub fn run_diff(data_dir: &Path, opts: crate::diff::DiffOptions) -> Result<crate::diff::Diff, String> {
-    crate::diff::diff_snapshots(data_dir, None, None, opts).map_err(|e| e.to_string())
+    let mut d = crate::diff::diff_snapshots(data_dir, None, None, opts).map_err(|e| e.to_string())?;
+    d.annotate(&crate::rules::RuleSet::with_local(data_dir), &crate::rules::Context::system());
+    Ok(d)
 }
 
 /// `system_items`: space Windows manages, with the tool that manages each.

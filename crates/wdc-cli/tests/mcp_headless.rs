@@ -23,7 +23,7 @@ fn mcp_client_scans_and_drills_down_headless() {
     assert_eq!(init["serverInfo"]["name"], "wdc");
     let tools = c.request("tools/list", serde_json::json!({}));
     let names: Vec<_> = tools["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-    assert_eq!(names, vec!["scan", "tree", "diff", "system_items"]);
+    assert_eq!(names, vec!["scan", "tree", "diff", "explain", "system_items"]);
 
     let r = c.call("scan", serde_json::json!({ "roots": [tree.to_string_lossy()] }));
     assert_ne!(r["isError"], true, "{r}");

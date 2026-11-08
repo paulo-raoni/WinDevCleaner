@@ -1,0 +1,66 @@
+# Windows itself (plan, sections 4.2 and 5.3): never touched. The rules show what an item is
+# and point to Windows' own tools, as advice only.
+
+[[rule]]
+id = "windows-component-store"
+title = "Windows component store"
+title_pt_br = "Repositório de componentes do Windows"
+class = "never-touch"
+action = "report-only"
+paths = ['%WINDIR%\WinSxS']
+evidence = "Windows' component store. Many of its files are hard links into the rest of Windows, so its apparent size overstates what it uses."
+evidence_pt_br = "Repositório de componentes do Windows. Muitos arquivos são hard links para o resto do Windows, então o tamanho aparente exagera o que ele ocupa."
+source = "Microsoft documentation: Manage the Component Store."
+cost = "Breaks Windows updates and repairs."
+cost_pt_br = "Quebra atualizações e reparos do Windows."
+instructions = "`DISM /Online /Cleanup-Image /StartComponentCleanup` in an administrator terminal, or Disk Cleanup > Clean up system files > Windows Update Cleanup."
+instructions_pt_br = "`DISM /Online /Cleanup-Image /StartComponentCleanup` num terminal de administrador, ou Limpeza de Disco > Limpar arquivos do sistema > Limpeza do Windows Update."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "windows-old"
+title = "Previous Windows installation"
+title_pt_br = "Instalação anterior do Windows"
+class = "never-touch"
+action = "report-only"
+paths = ['%SystemDrive%\Windows.old']
+evidence = "Kept by Windows after an upgrade so it can go back; Windows removes it by itself after some days."
+evidence_pt_br = "Guardada pelo Windows depois de uma atualização para poder voltar atrás; o Windows a remove sozinho depois de alguns dias."
+source = "Microsoft documentation: Delete your previous version of Windows."
+cost = "No way back to the previous version."
+cost_pt_br = "Sem volta para a versão anterior."
+instructions = "Settings > System > Storage > Temporary files > Previous Windows installation(s)."
+instructions_pt_br = "Configurações > Sistema > Armazenamento > Arquivos temporários > Instalações anteriores do Windows."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "package-cache"
+title = "Installer package cache"
+title_pt_br = "Cache de pacotes de instaladores"
+class = "never-touch"
+action = "report-only"
+paths = ['%ProgramData%\Package Cache']
+evidence = "Installers that programs need to repair, modify or uninstall themselves (Visual Studio, SDKs, redistributables)."
+evidence_pt_br = "Instaladores de que os programas precisam para se reparar, modificar ou desinstalar (Visual Studio, SDKs, redistribuíveis)."
+source = "Microsoft documentation of the Visual Studio package cache."
+cost = "Uninstalls and repairs of those programs fail."
+cost_pt_br = "Desinstalações e reparos desses programas falham."
+instructions = "Uninstall the programs you no longer need from Settings > Apps; their cached packages go with them."
+instructions_pt_br = "Desinstale os programas que não usa mais em Configurações > Aplicativos; os pacotes deles saem junto."
+last_verified = "2026-11-07"
+
+[[rule]]
+id = "windows"
+title = "Windows"
+title_pt_br = "Windows"
+class = "never-touch"
+action = "report-only"
+paths = ['%WINDIR%\**']
+evidence = "Windows' own folder."
+evidence_pt_br = "A pasta do próprio Windows."
+source = "Plan, section 5.3: forbidden, always."
+cost = "Breaks Windows."
+cost_pt_br = "Quebra o Windows."
+instructions = "Settings > System > Storage, Storage Sense and Disk Cleanup manage what can go."
+instructions_pt_br = "Configurações > Sistema > Armazenamento, o Sensor de Armazenamento e a Limpeza de Disco cuidam do que pode sair."
+last_verified = "2026-11-07"
