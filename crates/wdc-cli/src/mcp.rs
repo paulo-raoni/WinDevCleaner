@@ -40,7 +40,8 @@ struct WdcServer {
 
 const INSTRUCTIONS: &str = "WinDevCleaner finds where disk space is on Windows. This version is read-only: \
 `scan` measures sizes on disk (hard links counted once, links not followed, cloud files not downloaded) and \
-`tree` drills into a folder of the latest scan. When the WinDevCleaner app is open, the user watches every \
+`tree` drills into a folder of the latest scan, `diff` shows what grew since the previous scan of the same folders, \
+and `system_items` reports the space Windows manages (Recycle Bin, paging and hibernation files, dumps). When the WinDevCleaner app is open, the user watches every \
 call live in the app and can pause or disconnect you.";
 
 impl WdcServer {
@@ -132,6 +133,12 @@ fn run_call(backend: &mut Backend, tool: &str, args: Value) -> Result<Value, Str
                 let (path, limit) = tools::parse_tree_args(&args)?;
                 tools::run_tree(last.as_deref(), &path, limit)
             }
+            tools::DIFF => {
+                let opts = tools::parse_diff_args(&args)?;
+                let d = tools::run_diff(&wdc_core::scope::data_dir(), opts)?;
+                serde_json::to_value(d).map_err(|e| e.to_string())
+            }
+            tools::SYSTEM_ITEMS => Ok(tools::run_system_items()),
             other => Err(format!("unknown tool `{other}`")),
         },
     }

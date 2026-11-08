@@ -44,6 +44,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("scan") => scan_command(&rest[1..], lang),
+        Some("diff") => diff_command(&rest[1..], lang),
         Some("mcp") => {
             let show = match rest[1..].iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
                 [] => false,
@@ -216,6 +217,11 @@ fn print_human(lang: Lang, args: &ScanArgs, report: &wdc_core::scan::ScanReport,
     if t.errors > 0 {
         println!("{}", lang.fmt(Msg::CliErrors, &[("n", &n(t.errors))]));
     }
+    if let Some(items) = summary.get("system_items").and_then(|v| v.as_array()) {
+        println!("\n{}", lang.t(Msg::CliSystemItems));
+        print_system_items(lang, items);
+        println!();
+    }
     match summary.get("snapshot") {
         Some(s) if s.get("path").is_some() => println!(
             "{}",
@@ -233,5 +239,131 @@ fn print_human(lang: Lang, args: &ScanArgs, report: &wdc_core::scan::ScanReport,
             lang.fmt(Msg::CliSnapshotFailed, &[("error", s["error"].as_str().unwrap_or_default())])
         ),
         None => println!("{}", lang.t(Msg::CliCancelled)),
+    }
+}
+
+fn print_system_items(lang: Lang, items: &[serde_json::Value]) {
+    use wdc_core::system::{Kind, Status};
+    for it in items {
+        let (Ok(kind), Ok(status)) = (
+            serde_json::from_value::<Kind>(it["kind"].clone()),
+            serde_json::from_value::<Status>(it["status"].clone()),
+        ) else {
+            continue;
+        };
+        if status == Status::Absent {
+            continue;
+        }
+        let size = match (it["bytes"].as_u64(), status.note()) {
+            (Some(b), None) => fmt::bytes(b),
+            (_, Some(note)) => lang.t(note).to_string(),
+            (None, None) => String::new(),
+        };
+        let path = it["path"].as_str().map(|p| format!("  {p}")).unwrap_or_default();
+        println!("  {:>10}  {}{path}", size, lang.t(kind.name()));
+        println!("              {}", lang.t(kind.managed_by()));
+    }
+}
+
+fn diff_command(args: &[String], lang: Lang) -> ExitCode {
+    let mut json = false;
+    let mut from: Option<PathBuf> = None;
+    let mut to: Option<PathBuf> = None;
+    let mut opts = wdc_core::diff::DiffOptions::default();
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        match a {
+            "--json" => json = true,
+            "--from" | "--to" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("{}", lang.fmt(Msg::CliBadValue, &[("option", a), ("value", "")]));
+                    return ExitCode::from(1);
+                };
+                if a == "--from" {
+                    from = Some(PathBuf::from(v));
+                } else {
+                    to = Some(PathBuf::from(v));
+                }
+                i += 1;
+            }
+            "--min-mb" | "--limit" => {
+                let n = match parse_number(lang, a, args.get(i + 1)) {
+                    Ok(n) => n,
+                    Err(code) => return code,
+                };
+                if a == "--min-mb" {
+                    opts.min_bytes = n.saturating_mul(1024 * 1024);
+                } else {
+                    opts.limit = n.clamp(1, 1000) as usize;
+                }
+                i += 1;
+            }
+            _ => {
+                eprintln!("{}", lang.fmt(Msg::CliUnknownCommand, &[("arg", a)]));
+                return ExitCode::from(1);
+            }
+        }
+        i += 1;
+    }
+    let data_dir = wdc_core::scope::data_dir();
+    let d = match wdc_core::diff::diff_snapshots(&data_dir, from.as_deref(), to.as_deref(), opts) {
+        Ok(d) => d,
+        Err(wdc_core::diff::DiffError::NotEnoughSnapshots) => {
+            if json {
+                println!("{}", serde_json::json!({ "error": "need two scans of the same folders" }));
+            } else {
+                eprintln!("{}", lang.t(Msg::CliDiffNeedTwo));
+            }
+            return ExitCode::from(3);
+        }
+        Err(e) => {
+            eprintln!("{}", lang.fmt(Msg::CliScanFailed, &[("error", &e.to_string())]));
+            return ExitCode::from(2);
+        }
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&d).unwrap());
+        return ExitCode::SUCCESS;
+    }
+    print_diff(lang, &d);
+    ExitCode::SUCCESS
+}
+
+/// Signed size: "+1.50 GiB", "-20.0 MiB".
+fn signed(delta: i64) -> String {
+    let sign = if delta < 0 { "-" } else { "+" };
+    format!("{sign}{}", fmt::bytes(delta.unsigned_abs()))
+}
+
+fn change_text(lang: Lang, c: wdc_core::diff::Change) -> &'static str {
+    use wdc_core::diff::Change;
+    lang.t(match c {
+        Change::New => Msg::DiffNew,
+        Change::Grown => Msg::DiffGrown,
+        Change::Shrunk => Msg::DiffShrunk,
+        Change::Removed => Msg::DiffRemoved,
+    })
+}
+
+fn print_diff(lang: Lang, d: &wdc_core::diff::Diff) {
+    println!(
+        "{}",
+        lang.fmt(Msg::CliDiffHeader, &[("from", &d.from.created), ("to", &d.to.created), ("delta", &signed(d.delta_bytes))])
+    );
+    if d.dirs.is_empty() {
+        println!("{}", lang.fmt(Msg::CliDiffNone, &[("min", &fmt::bytes(d.min_bytes))]));
+    }
+    for c in &d.dirs {
+        println!("  {:>11}  {:<9} {}", signed(c.delta_bytes), change_text(lang, c.change), c.path);
+    }
+    if d.more > 0 {
+        println!("{}", lang.fmt(Msg::CliDiffMore, &[("n", &d.more.to_string())]));
+    }
+    if !d.files.is_empty() {
+        println!("\n{}", lang.t(Msg::CliDiffFiles));
+        for f in &d.files {
+            println!("  {:>11}  {:<9} {}", signed(f.delta_bytes), change_text(lang, f.change), f.path);
+        }
     }
 }
