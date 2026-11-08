@@ -572,8 +572,8 @@ messages! {
         "Conditions:",
         "Condições:";
     ExplainActionable =>
-        "Actionable: yes. A plan (slice 4) could include it; nothing is changed now.",
-        "Pode ser agido: sim. Um plano (slice 4) poderia incluí-lo; nada é alterado agora.";
+        "Actionable: yes. `wdc plan` can include it; nothing is changed now.",
+        "Pode ser agido: sim. O `wdc plan` pode incluí-lo; nada é alterado agora.";
     ExplainNotActionable =>
         "Actionable: no.",
         "Pode ser agido: não.";
@@ -595,6 +595,99 @@ messages! {
     AppActExplain =>
         "explaining {path}",
         "explicando {path}";
+    PlanUnknownFormat =>
+        "This plan file has format {format}, which this version does not read. Draft the plan again.",
+        "Este arquivo de plano tem formato {format}, que esta versão não lê. Gere o plano de novo.";
+    PlanEdited =>
+        "This plan was changed after it was written (its hash does not match). Draft it again with `wdc plan`.",
+        "Este plano foi alterado depois de escrito (o hash não confere). Gere de novo com `wdc plan`.";
+    PlanTooOld =>
+        "This plan is {hours} hours old; plans older than 24 hours are refused. Draft it again with `wdc plan`.",
+        "Este plano tem {hours} horas; planos com mais de 24 horas são recusados. Gere de novo com `wdc plan`.";
+    PlanFromFuture =>
+        "This plan is dated in the future. Check the clock and draft it again.",
+        "Este plano tem data no futuro. Confira o relógio e gere de novo.";
+    PresenceNoDesktop =>
+        "No desktop to show the presence code on. Run this in your own Windows session.",
+        "Não há área de trabalho para mostrar o código de presença. Rode isto na sua própria sessão do Windows.";
+    PresenceCanceled =>
+        "Windows Hello was cancelled. Nothing was changed.",
+        "O Windows Hello foi cancelado. Nada foi alterado.";
+    PresenceWrongCode =>
+        "Wrong code. Nothing was changed.",
+        "Código errado. Nada foi alterado.";
+    PresenceTimedOut =>
+        "No code was typed in time. Nothing was changed.",
+        "Nenhum código foi digitado a tempo. Nada foi alterado.";
+    PresenceNoInput =>
+        "The console input ended without a code. Nothing was changed.",
+        "A entrada do console terminou sem um código. Nada foi alterado.";
+    PresenceHelloFailed =>
+        "Windows Hello did not verify you ({detail}). Nothing was changed.",
+        "O Windows Hello não confirmou você ({detail}). Nada foi alterado.";
+    PresenceUnsupported =>
+        "Presence cannot be proven on this system. Nothing was changed.",
+        "Não é possível provar presença neste sistema. Nada foi alterado.";
+    PresenceHelloPrompt =>
+        "Confirm with Windows Hello (PIN, face or fingerprint)...",
+        "Confirme com o Windows Hello (PIN, rosto ou digital)...";
+    PresenceDialogText =>
+        "WinDevCleaner needs to know a person is here.\n\nType this code in the console where you ran the command:\n\n{code}\n\nIf you did not run a WinDevCleaner command, close this and type nothing.",
+        "O WinDevCleaner precisa saber que há uma pessoa aqui.\n\nDigite este código no console onde você rodou o comando:\n\n{code}\n\nSe você não rodou um comando do WinDevCleaner, feche isto e não digite nada.";
+    PresenceTypeCode =>
+        "A code is shown in a desktop dialog (never here). Type it and press Enter:",
+        "Um código aparece numa janela da área de trabalho (nunca aqui). Digite e tecle Enter:";
+    PurgeTooRecent =>
+        "kept in quarantine for {days} more days (early purge is only for caches and install leftovers)",
+        "fica na quarentena por mais {days} dias (apagar antes só vale para caches e sobras de instalação)";
+    PurgeNotCache =>
+        "early purge is only for regenerable caches and install leftovers; rule {rule} is neither",
+        "apagar antes do prazo só vale para caches regeneráveis e sobras de instalação; a regra {rule} não é nenhum dos dois";
+    PurgeNotExplained =>
+        "its explanation was not shown when it was approved, so it waits the 7 days",
+        "a explicação não foi mostrada na aprovação, então espera os 7 dias";
+    PurgeOutside =>
+        "the stored path {path} is not inside a quarantine folder; nothing deleted",
+        "o caminho guardado {path} não está numa pasta de quarentena; nada apagado";
+    PurgeChanged =>
+        "what is in quarantine is not what was moved there; nothing done",
+        "o que está na quarentena não é o que foi movido para lá; nada feito";
+    PurgeFailed =>
+        "could not delete: {error}",
+        "não foi possível apagar: {error}";
+    RestoreUnknown =>
+        "No quarantined item has this id. `wdc quarantine` lists them.",
+        "Nenhum item da quarentena tem este id. `wdc quarantine` lista os itens.";
+    RestoreExists =>
+        "{original} exists again (the app recreated it?). Both are kept: the quarantined copy stays at {stored}. Remove or rename one, then restore.",
+        "{original} existe de novo (o app recriou?). Os dois foram mantidos: a cópia da quarentena continua em {stored}. Remova ou renomeie um, e restaure.";
+    RestoreParentChanged =>
+        "The folder it was in, {path}, is gone or is now a link. Nothing was moved.",
+        "A pasta onde estava, {path}, sumiu ou agora é um link. Nada foi movido.";
+    RestoreNotAllowed =>
+        "Its original place is not one WinDevCleaner may act on now. Nothing was moved.",
+        "O lugar original não é um onde o WinDevCleaner possa agir agora. Nada foi movido.";
+    RestoreMissing =>
+        "The quarantined copy is gone.",
+        "A cópia da quarentena sumiu.";
+    ApplyRenameFailed =>
+        "could not move it ({error}); nothing forced",
+        "não foi possível mover ({error}); nada foi forçado";
+    ApplyNotAllowed =>
+        "its real path {path} is not allowed: {why}",
+        "o caminho real {path} não é permitido: {why}";
+    ApplyChanged =>
+        "it changed since the plan ({what}); draft the plan again",
+        "mudou desde o plano ({what}); gere o plano de novo";
+    ApplyNoMatch =>
+        "no built-in rule matches {path} as an item now",
+        "nenhuma regra embutida reconhece {path} como item agora";
+    ApplyRuleChanged =>
+        "another rule matches it now ({rule}); draft the plan again",
+        "outra regra o reconhece agora ({rule}); gere o plano de novo";
+    ApplyQuarantineUnsafe =>
+        "the quarantine folder is not safe to use ({detail})",
+        "a pasta de quarentena não é segura para usar ({detail})";
 }
 
 

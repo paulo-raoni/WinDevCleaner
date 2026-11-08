@@ -180,9 +180,12 @@ pub fn forbidden_reason(path: &str, is_dir: bool, ctx: &Context, data_dir: Optio
         }
     }
     if let Some(d) = data_dir {
-        if is_under(&p, &format!("{d}\\quarantine")) {
+        if is_under(&p, &format!("{d}\\quarantine")) || is_under(&p, &format!("{}\\quarantine", real(d))) {
             return Some(Forbid::Quarantine);
         }
+    }
+    if segs.get(1) == Some(&crate::quarantine::VOLUME_FOLDER) {
+        return Some(Forbid::Quarantine);
     }
     if is_dir && crate::rules::native(&format!("{p}\\.git")).exists() {
         return Some(Forbid::GitRepository);

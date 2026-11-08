@@ -321,7 +321,7 @@ fn segments(p: &str) -> Vec<&str> {
 }
 
 /// `*` and `?` inside one name, case-insensitive.
-fn glob(pattern: &str, name: &str) -> bool {
+pub(crate) fn glob(pattern: &str, name: &str) -> bool {
     let p: Vec<char> = pattern.to_lowercase().chars().collect();
     let n: Vec<char> = name.to_lowercase().chars().collect();
     let (mut pi, mut ni, mut star, mut mark) = (0usize, 0usize, None, 0usize);
