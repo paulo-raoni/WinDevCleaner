@@ -22,11 +22,13 @@ pub struct WdcApp {
     /// Folders to force open once, so the view follows the agent.
     open_path: HashSet<u32>,
     focus_node: Option<u32>,
+    /// A folder whose "?" was pressed this frame.
+    pending_explain: Option<u32>,
 }
 
 impl WdcApp {
     pub fn new(core: Arc<AppCore>) -> WdcApp {
-        WdcApp { core, seen_focus: 0, open_path: HashSet::new(), focus_node: None }
+        WdcApp { core, seen_focus: 0, open_path: HashSet::new(), focus_node: None, pending_explain: None }
     }
 }
 
@@ -51,6 +53,7 @@ fn describe(lang: Lang, e: &Entry) -> String {
             wdc_core::tools::TREE => lang.fmt(Msg::AppActTree, &[("path", target)]),
             wdc_core::tools::DIFF => lang.t(Msg::AppActDiff).to_string(),
             wdc_core::tools::SYSTEM_ITEMS => lang.t(Msg::AppActSystem).to_string(),
+            wdc_core::tools::EXPLAIN => lang.fmt(Msg::AppActExplain, &[("path", target)]),
             other => format!("{other} {target}"),
         },
     }
@@ -200,6 +203,7 @@ impl eframe::App for WdcApp {
                     (View::Space, Msg::AppWhereIsMySpace),
                     (View::Growth, Msg::AppTabGrowth),
                     (View::System, Msg::AppTabSystem),
+                    (View::Explain, Msg::AppTabExplain),
                 ] {
                     if ui.selectable_label(view == v, RichText::new(lang.t(label)).heading()).clicked() {
                         core.set_view(v);
@@ -214,6 +218,10 @@ impl eframe::App for WdcApp {
                 }
                 View::System => {
                     system_view(ui, lang, &core);
+                    return;
+                }
+                View::Explain => {
+                    explain_view(ui, lang, &core);
                     return;
                 }
                 View::Space => {}
@@ -247,6 +255,9 @@ impl eframe::App for WdcApp {
                     }
                 }
             });
+            if let Some(n) = self.pending_explain.take() {
+                core.start_explain(report.dir_path(n));
+            }
         });
     }
 }
@@ -267,30 +278,47 @@ impl WdcApp {
         // Forced opening happens once per node; then the human is free to collapse it.
         let force = self.open_path.remove(&n);
         let label = if focused { RichText::new(text).monospace().strong() } else { RichText::new(text).monospace() };
+        let explain_tip = lang.t(Msg::AppTabExplain);
         if kids.is_empty() {
-            let resp = ui.label(label);
+            let resp = ui
+                .horizontal(|ui| {
+                    if ui.small_button("?").on_hover_text(explain_tip).clicked() {
+                        self.pending_explain = Some(n);
+                    }
+                    ui.label(label)
+                })
+                .inner;
             if focused && force {
                 resp.scroll_to_me(Some(egui::Align::Center));
             }
             return;
         }
-        let mut header = egui::CollapsingHeader::new(label).id_salt(("dir", n));
+        let id = ui.make_persistent_id(("dir", n));
+        let mut state =
+            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, d.parent == wdc_core::scan::NO_PARENT);
         if force {
-            header = header.open(Some(true));
+            state.set_open(true);
         }
-        if d.parent == wdc_core::scan::NO_PARENT {
-            header = header.default_open(true);
-        }
-        let resp = header.show(ui, |ui| {
-            for &k in kids.iter().take(MAX_CHILDREN) {
-                self.node(ui, lang, report, children, k, d.bytes);
-            }
-            if kids.len() > MAX_CHILDREN {
-                ui.label(RichText::new(lang.fmt(Msg::AppMoreItems, &[("n", &fmt::count((kids.len() - MAX_CHILDREN) as u64))])).weak());
-            }
-        });
+        let (_, header, _) = state
+            .show_header(ui, |ui| {
+                if ui.small_button("?").on_hover_text(explain_tip).clicked() {
+                    self.pending_explain = Some(n);
+                }
+                ui.label(label)
+            })
+            .body(|ui| {
+                for &k in kids.iter().take(MAX_CHILDREN) {
+                    self.node(ui, lang, report, children, k, d.bytes);
+                }
+                if kids.len() > MAX_CHILDREN {
+                    ui.label(
+                        RichText::new(lang.fmt(Msg::AppMoreItems, &[("n", &fmt::count((kids.len() - MAX_CHILDREN) as u64))]))
+                            .weak(),
+                    );
+                }
+            });
         if focused && force {
-            resp.header_response.scroll_to_me(Some(egui::Align::Center));
+            header.response.scroll_to_me(Some(egui::Align::Center));
         }
     }
 }
@@ -375,6 +403,76 @@ fn system_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
             });
             ui.label(RichText::new(lang.t(it.kind.managed_by())).weak());
             ui.add_space(4.0);
+        }
+    });
+}
+
+/// "Explain": the latest explanation, by the human's "?" or by an agent.
+fn explain_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
+    let e = core.shared.lock().unwrap().explanation.clone();
+    let Some(e) = e else {
+        ui.label(lang.t(Msg::AppExplainNone));
+        return;
+    };
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        let kind = lang.t(match e.kind {
+            "folder" => Msg::KindFolder,
+            "file" => Msg::KindFile,
+            "link" => Msg::KindLink,
+            _ => Msg::KindMissing,
+        });
+        ui.label(RichText::new(lang.fmt(Msg::ExplainItem, &[("item", &e.item), ("kind", kind)])).strong().monospace());
+        if e.exists {
+            ui.label(lang.fmt(Msg::ExplainSize, &[("size", &fmt::bytes(e.bytes_on_disk)), ("files", &fmt::count(e.files))]));
+            ui.label(RichText::new(lang.fmt(Msg::ExplainFreed, &[("size", &fmt::bytes(e.expected_freed_bytes))])).strong());
+        }
+        for h in &e.hard_links {
+            ui.label(lang.fmt(Msg::ExplainLinked, &[("size", &fmt::bytes(h.bytes_on_disk)), ("n", &h.links.to_string())]));
+            for n in &h.names {
+                let out = if h.names_outside.contains(n) { format!("  {}", lang.t(Msg::ExplainOutside)) } else { String::new() };
+                ui.label(RichText::new(format!("    {n}{out}")).monospace());
+            }
+        }
+        ui.separator();
+        match &e.rule {
+            None => {
+                ui.label(RichText::new(lang.t(Msg::ExplainUnknown)).color(Color32::from_rgb(0xd9, 0x8c, 0x00)));
+            }
+            Some(r) => {
+                let full = &r.full;
+                ui.label(
+                    RichText::new(lang.fmt(
+                        Msg::ExplainRule,
+                        &[("title", full.title(lang)), ("class", r.class.text(lang)), ("action", r.action.text(lang))],
+                    ))
+                    .strong(),
+                );
+                if let wdc_core::rules::Origin::Local(file) = &r.origin {
+                    ui.label(lang.fmt(Msg::ExplainLocalRuleNote, &[("file", file)]));
+                }
+                ui.label(lang.fmt(Msg::ExplainEvidence, &[("text", full.evidence(lang))]));
+                ui.label(RichText::new(lang.fmt(Msg::ExplainSource, &[("text", &full.source)])).weak());
+                ui.label(lang.fmt(Msg::ExplainCost, &[("text", full.cost(lang))]));
+                if let Some(how) = full.instructions(lang) {
+                    ui.label(lang.fmt(Msg::ExplainHow, &[("text", how)]));
+                }
+            }
+        }
+        if !e.match_conditions.is_empty() || !e.require_conditions.is_empty() {
+            ui.label(RichText::new(lang.t(Msg::ExplainConditions)).strong());
+            for c in e.match_conditions.iter().chain(&e.require_conditions) {
+                let color = if c.passed { Color32::from_rgb(0x27, 0xae, 0x60) } else { Color32::from_rgb(0xeb, 0x57, 0x57) };
+                ui.label(RichText::new(format!("{} {}", if c.passed { "✔" } else { "✘" }, c.found.text(lang))).color(color));
+            }
+        }
+        ui.separator();
+        if e.actionable {
+            ui.label(RichText::new(lang.t(Msg::ExplainActionable)).color(Color32::from_rgb(0x27, 0xae, 0x60)));
+        } else {
+            ui.label(RichText::new(lang.t(Msg::ExplainNotActionable)).strong());
+            for w in &e.why_not {
+                ui.label(format!("• {}", w.text(lang)));
+            }
         }
     });
 }
