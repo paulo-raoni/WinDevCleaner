@@ -94,8 +94,8 @@ macro_rules! messages {
 messages! {
     // Command line.
     CliUsage =>
-        "WinDevCleaner {version}: find where your disk space is. Read-only in this version.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless.\n  wdc --version\n",
-        "WinDevCleaner {version}: descubra onde está o espaço do seu disco. Somente leitura nesta versão.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela.\n  wdc --version\n";
+        "WinDevCleaner {version}: find where your disk space is. Read-only in this version.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless.\n  wdc --version\n",
+        "WinDevCleaner {version}: descubra onde está o espaço do seu disco. Somente leitura nesta versão.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela.\n  wdc --version\n";
     CliUnknownCommand =>
         "Unknown command or option: {arg}. Run `wdc --help`.",
         "Comando ou opção desconhecida: {arg}. Rode `wdc --help`.";
@@ -248,7 +248,125 @@ messages! {
     AppHumanScan =>
         "you",
         "você";
+
+    // What grew (slice 2).
+    CliDiffHeader =>
+        "What changed between the scans of {from} and {to}: {delta} in total.",
+        "O que mudou entre as análises de {from} e {to}: {delta} no total.";
+    CliDiffNone =>
+        "No folder changed by {min} or more.",
+        "Nenhuma pasta mudou {min} ou mais.";
+    CliDiffNeedTwo =>
+        "Comparing needs two scans of the same folders. Run `wdc scan` again later.",
+        "Para comparar são precisas duas análises das mesmas pastas. Rode `wdc scan` de novo mais tarde.";
+    CliDiffFiles =>
+        "Large files, new or grown:",
+        "Arquivos grandes, novos ou que cresceram:";
+    CliDiffMore =>
+        "... and {n} more changes (see --limit).",
+        "... e mais {n} mudanças (veja --limit).";
+    DiffNew =>
+        "new",
+        "novo";
+    DiffGrown =>
+        "grew",
+        "cresceu";
+    DiffShrunk =>
+        "shrank",
+        "diminuiu";
+    DiffRemoved =>
+        "removed",
+        "removido";
+
+    // System items (slice 2).
+    CliSystemItems =>
+        "System items (report-only; Windows manages them):",
+        "Itens do sistema (só relatório; o Windows os gerencia):";
+    SysStatusAbsent =>
+        "not present",
+        "não existe";
+    SysStatusNeedsAdmin =>
+        "only an administrator can read it",
+        "só um administrador pode ler";
+    SysStatusError =>
+        "could not be read",
+        "não pôde ser lido";
+    SysRecycleBin =>
+        "Recycle Bin",
+        "Lixeira";
+    SysRecycleBinHow =>
+        "Empty it from its desktop icon, or let Storage Sense do it (Settings > System > Storage).",
+        "Esvazie pelo ícone na área de trabalho, ou deixe o Sensor de Armazenamento fazer isso (Configurações > Sistema > Armazenamento).";
+    SysPageFile =>
+        "Paging file",
+        "Arquivo de paginação";
+    SysPageFileHow =>
+        "Managed by Windows: Settings > System > About > Advanced system settings > Performance > Advanced > Virtual memory.",
+        "Gerenciado pelo Windows: Configurações > Sistema > Sobre > Configurações avançadas do sistema > Desempenho > Avançado > Memória virtual.";
+    SysSwapFile =>
+        "Swap file (Store apps)",
+        "Arquivo de troca (apps da Store)";
+    SysSwapFileHow =>
+        "Managed by Windows together with the paging file.",
+        "Gerenciado pelo Windows junto com o arquivo de paginação.";
+    SysHibernation =>
+        "Hibernation file",
+        "Arquivo de hibernação";
+    SysHibernationHow =>
+        "`powercfg /h /type reduced` shrinks it; `powercfg /h off` removes it and turns off hibernation and Fast Startup. Both need an administrator terminal.",
+        "`powercfg /h /type reduced` diminui o arquivo; `powercfg /h off` remove o arquivo e desliga a hibernação e a Inicialização Rápida. Os dois precisam de um terminal de administrador.";
+    SysErrorReports =>
+        "Windows error reports",
+        "Relatórios de erros do Windows";
+    SysErrorReportsHow =>
+        "Settings > System > Storage > Temporary files > Windows error reports, or Disk Cleanup.",
+        "Configurações > Sistema > Armazenamento > Arquivos temporários > Relatórios de erros do Windows, ou Limpeza de Disco.";
+    SysCrashDumps =>
+        "App crash dumps",
+        "Despejos de falha de apps";
+    SysCrashDumpsHow =>
+        "Left by apps that crashed. Keep them while you debug a crash; otherwise Disk Cleanup removes them.",
+        "Deixados por apps que travaram. Guarde enquanto investiga uma falha; senão a Limpeza de Disco os remove.";
+    SysMemoryDumps =>
+        "System memory dumps",
+        "Despejos de memória do sistema";
+    SysLiveKernelReports =>
+        "Live kernel reports",
+        "Relatórios do kernel em tempo real";
+    SysMemoryDumpsHow =>
+        "Disk Cleanup > Clean up system files > System error memory dump files (needs an administrator).",
+        "Limpeza de Disco > Limpar arquivos do sistema > Arquivos de despejo de memória de erros do sistema (precisa de administrador).";
+    SysSystemRestore =>
+        "System Restore shadow storage",
+        "Armazenamento de sombra da Restauração do Sistema";
+    SysSystemRestoreHow =>
+        "System Properties > System Protection > Configure. Its size needs an administrator (`vssadmin list shadowstorage`).",
+        "Propriedades do Sistema > Proteção do Sistema > Configurar. O tamanho só é visível para administradores (`vssadmin list shadowstorage`).";
+
+    // App, slice 2.
+    AppTabGrowth =>
+        "What grew?",
+        "O que cresceu?";
+    AppTabSystem =>
+        "System items",
+        "Itens do sistema";
+    AppGrowthNone =>
+        "No comparison yet: it needs two scans of the same folders. Scan now and again later.",
+        "Nenhuma comparação ainda: são precisas duas análises das mesmas pastas. Analise agora e de novo mais tarde.";
+    AppReadSystem =>
+        "Read system items",
+        "Ler itens do sistema";
+    AppSystemNotRead =>
+        "System items have not been read yet. They are always report-only: Windows manages them.",
+        "Os itens do sistema ainda não foram lidos. São sempre só relatório: o Windows os gerencia.";
+    AppActDiff =>
+        "comparing the last two scans",
+        "comparando as duas últimas análises";
+    AppActSystem =>
+        "reading system items",
+        "lendo itens do sistema";
 }
+
 
 #[cfg(test)]
 mod tests {

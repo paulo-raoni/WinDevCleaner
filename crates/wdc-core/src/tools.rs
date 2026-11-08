@@ -19,6 +19,8 @@ pub struct ToolSpec {
 
 pub const SCAN: &str = "scan";
 pub const TREE: &str = "tree";
+pub const DIFF: &str = "diff";
+pub const SYSTEM_ITEMS: &str = "system_items";
 
 pub fn specs() -> Vec<ToolSpec> {
     vec![
@@ -62,6 +64,32 @@ pub fn specs() -> Vec<ToolSpec> {
                 })
             },
         },
+        ToolSpec {
+            name: DIFF,
+            description: "What grew since last time: compares the latest scan with the previous scan of the same \
+                folders (from the saved snapshots). New and grown folders come first, each shown at the place that \
+                changed (not every parent), even when no rule knows them; then removed and shrunk ones. Needs two \
+                scans of the same folders. When the app is open, the app shows the same comparison.",
+            schema: || {
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "min_bytes": { "type": "integer", "minimum": 0,
+                                       "description": "Smallest change shown (default 1 MiB)." },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 1000,
+                                   "description": "Most folders shown (default 50)." }
+                    },
+                    "additionalProperties": false
+                })
+            },
+        },
+        ToolSpec {
+            name: SYSTEM_ITEMS,
+            description: "Space Windows itself manages, read through Windows' own APIs: Recycle Bin, paging, swap and \
+                hibernation files, error reports, crash and memory dumps, System Restore. Always report-only; each \
+                item names the Windows setting or tool that manages it. When the app is open, the app shows them.",
+            schema: || json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        },
     ]
 }
 
@@ -72,6 +100,8 @@ pub struct ScanArgs {
     pub depth: u16,
     /// What the scan is about, for display ("C:\Users\me, C:\ProgramData").
     pub target: String,
+    /// The default read scope: system items are read too.
+    pub default_scope: bool,
 }
 
 pub fn parse_scan_args(args: &Value) -> Result<ScanArgs, String> {
@@ -86,6 +116,7 @@ pub fn parse_scan_args(args: &Value) -> Result<ScanArgs, String> {
         }
     }
     let mut options = ScanOptions::default();
+    let default_scope = matches!(obj.get("roots"), None | Some(Value::Null));
     match obj.get("roots") {
         None | Some(Value::Null) => {
             let s = scope::default_read_scope();
@@ -115,7 +146,7 @@ pub fn parse_scan_args(args: &Value) -> Result<ScanArgs, String> {
         None => 3,
     };
     let target = options.roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ");
-    Ok(ScanArgs { options, depth, target })
+    Ok(ScanArgs { options, depth, target, default_scope })
 }
 
 /// Runs a scan, saves its snapshot, and returns the report with the agent's JSON summary.
@@ -134,7 +165,43 @@ pub fn run_scan<'a>(
             Err(e) => json!({ "error": e.to_string() }),
         };
     }
+    if args.default_scope {
+        summary["system_items"] = serde_json::to_value(crate::system::system_items()).unwrap_or(Value::Null);
+    }
     (report, summary)
+}
+
+/// Parsed arguments of `diff`.
+pub fn parse_diff_args(args: &Value) -> Result<crate::diff::DiffOptions, String> {
+    let mut o = crate::diff::DiffOptions::default();
+    let obj = match args {
+        Value::Null => return Ok(o),
+        Value::Object(m) => m,
+        _ => return Err("arguments must be an object".into()),
+    };
+    for k in obj.keys() {
+        if !["min_bytes", "limit"].contains(&k.as_str()) {
+            return Err(format!("unknown argument `{k}`"));
+        }
+    }
+    if let Some(v) = obj.get("min_bytes") {
+        o.min_bytes = v.as_u64().ok_or("`min_bytes` must be a non-negative integer")?;
+    }
+    if let Some(v) = obj.get("limit") {
+        o.limit = v.as_u64().ok_or("`limit` must be a positive integer")?.clamp(1, 1000) as usize;
+    }
+    Ok(o)
+}
+
+/// `diff`: what grew between the last two scans of the same folders.
+pub fn run_diff(data_dir: &Path, opts: crate::diff::DiffOptions) -> Result<crate::diff::Diff, String> {
+    crate::diff::diff_snapshots(data_dir, None, None, opts).map_err(|e| e.to_string())
+}
+
+/// `system_items`: space Windows manages, with the tool that manages each.
+pub fn run_system_items() -> Value {
+    let items = crate::system::system_items();
+    json!({ "total_bytes": crate::system::total(&items), "items": items })
 }
 
 /// Parsed arguments of `tree`.
