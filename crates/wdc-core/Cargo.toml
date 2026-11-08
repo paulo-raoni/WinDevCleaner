@@ -1,6 +1,6 @@
 [package]
 name = "wdc-core"
-description = "WinDevCleaner engine: read-only scanner, snapshots, messages and the app link."
+description = "WinDevCleaner engine: scanner, rules, plans, quarantine, presence proof and the app link."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

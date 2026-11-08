@@ -5,8 +5,8 @@
 # the item is eligible when every `require` condition passes too. Patterns use environment
 # variables, `*` inside one folder name, and a final `**` for a whole tree.
 #
-# Only the top-level folder names were checked on the owner's machine (2026-11-07); exact
-# patterns are confirmed there before slice 4 lets any of them act.
+# Only the top-level folder names were checked on the owner's machine (2026-11-07). Before the
+# first apply there, `wdc explain` on the real folders confirms the patterns.
 
 [[rule]]
 id = "vscode-obsolete-extension"

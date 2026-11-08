@@ -38,11 +38,29 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
     let data = fresh_dir("mirror-data");
     let suffix = format!("-mirror-test-{}", std::process::id());
     let pipe = wdc_core::link::pipe::pipe_name_with_suffix(&suffix).unwrap();
-    let env: [(&str, &OsStr); 3] =
-        [("WDC_DATA_DIR", data.as_os_str()), ("WDC_PIPE_SUFFIX", OsStr::new(&suffix)), ("WDC_LANG", OsStr::new("en"))];
+    // A fake user with a VS Code cache, for the plan the agent drafts (slice 4).
+    let profile = fresh_dir("mirror-profile");
+    let roaming = profile.join("AppData").join("Roaming");
+    let local = profile.join("AppData").join("Local");
+    let temp = local.join("Temp");
+    let cache = roaming.join("Code").join("CachedData");
+    std::fs::create_dir_all(cache.join("v1")).unwrap();
+    std::fs::create_dir_all(&temp).unwrap();
+    write_file(&cache.join("v1").join("data.bin"), 2 * 1024 * 1024);
+    let env: Vec<(&str, &OsStr)> = vec![
+        ("WDC_DATA_DIR", data.as_os_str()),
+        ("WDC_PIPE_SUFFIX", OsStr::new(&suffix)),
+        ("WDC_LANG", OsStr::new("en")),
+        ("USERPROFILE", profile.as_os_str()),
+        ("APPDATA", roaming.as_os_str()),
+        ("LOCALAPPDATA", local.as_os_str()),
+        ("TEMP", temp.as_os_str()),
+        // Nobody clicks in CI: the approval card gives up after 3 seconds.
+        ("WDC_APPROVAL_TIMEOUT_SECS", OsStr::new("3")),
+    ];
 
     let mut app_cmd = std::process::Command::new(env!("CARGO_BIN_EXE_WinDevCleaner"));
-    for (k, v) in env {
+    for (k, v) in &env {
         app_cmd.env(k, v);
     }
     let mut app = KillOnDrop(app_cmd.spawn().expect("start the app"));
@@ -82,10 +100,22 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
     assert_ne!(r["isError"], true, "{r}");
     assert!(r["structuredContent"]["items"].as_array().unwrap().iter().any(|i| i["kind"] == "recycle_bin"));
 
+    // Slice 4: the agent drafts a plan and asks the person to approve it. The app shows the
+    // approval card; nobody approves in CI, so it times out and nothing changes.
+    let r = mcp.call("plan", serde_json::json!({ "paths": [cache.to_string_lossy()] }));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(r["structuredContent"]["items"].as_array().unwrap().len(), 1, "{r}");
+    let hash = r["structuredContent"]["hash"].as_str().unwrap().to_string();
+    let r = mcp.call("request_apply", serde_json::json!({ "plan": hash }));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(r["structuredContent"]["status"], "timed-out", "{r}");
+    assert_eq!(r["structuredContent"]["changed"], false);
+    assert!(cache.join("v1").join("data.bin").exists(), "nothing moved without the person");
+
     // The app's activity log shows the agent and each of its calls, with the same result.
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut log = activity(&data);
-    while Instant::now() < deadline && log.iter().filter(|e| e["status"] == "done").count() < 6 {
+    while Instant::now() < deadline && log.iter().filter(|e| e["status"] == "done").count() < 8 {
         std::thread::sleep(Duration::from_millis(100));
         log = activity(&data);
     }
@@ -116,6 +146,9 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
         log.iter().any(|e| e["kind"] == "call" && e["tool"] == "system_items" && e["status"] == "done"),
         "the agent's system items call appears too"
     );
+    let asked = log.iter().find(|e| e["kind"] == "call" && e["tool"] == "request_apply" && e["status"] == "done");
+    assert!(asked.is_some(), "the request to apply appears in the app's activity log");
+    assert_eq!(asked.unwrap()["data"]["status"], "timed-out");
     // The scan went through the app, not headless: it ran while the app was open and the
     // running entry came before the finished one.
     let running = log.iter().position(|e| e["kind"] == "call" && e["tool"] == "scan" && e["status"] == "running");
@@ -130,4 +163,5 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
     assert!(app.0.try_wait().unwrap().is_none(), "the app is still running");
     drop(app);
     wdc_testkit::remove_tree(&fixture);
+    wdc_testkit::remove_tree(&profile);
 }

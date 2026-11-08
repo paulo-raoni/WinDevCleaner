@@ -106,7 +106,7 @@ pub struct Explanation {
     /// Programs the rule waits for that are running now.
     pub running_owners: Vec<String>,
     pub act_scope: Verdict,
-    /// Whether a plan (slice 4) could include this item now.
+    /// Whether a plan could include this item now.
     pub actionable: bool,
     /// Why not.
     pub why_not: Vec<WhyNot>,
