@@ -239,6 +239,9 @@ pub(crate) struct Walker {
     excluded: Vec<Vec<u16>>,
     buf: Vec<u64>,
     class: InfoClass,
+    /// Large files already counted, by (volume serial, file ID), across every root of the
+    /// scan: a file with one name in each of two roots is still counted once.
+    seen: HashSet<(u64, u128)>,
 }
 
 impl Walker {
@@ -248,7 +251,7 @@ impl Walker {
             .filter_map(|p| verbatim(p).ok())
             .map(|w| upper(&w))
             .collect();
-        Walker { excluded, buf: vec![0u64; 64 * 1024 / 8], class: InfoClass::Extended }
+        Walker { excluded, buf: vec![0u64; 64 * 1024 / 8], class: InfoClass::Extended, seen: HashSet::new() }
     }
 
     fn is_excluded(&self, path: &[u16]) -> bool {
@@ -311,7 +314,7 @@ impl Walker {
         }
 
         let volume = volume_serial(&h);
-        let mut seen: HashSet<(u64, u128)> = HashSet::new();
+        let mut seen = std::mem::take(&mut self.seen);
         let root_idx = c.add_dir(display, NO_PARENT);
         report.node = Some(root_idx);
 
@@ -376,6 +379,7 @@ impl Walker {
                 stack.push((idx, full, None));
             }
         }
+        self.seen = seen;
         report
     }
 }

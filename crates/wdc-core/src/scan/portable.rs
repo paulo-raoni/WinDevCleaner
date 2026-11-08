@@ -11,11 +11,12 @@ use super::{Collector, LinkKind, RootReport, TopFile, DEDUP_THRESHOLD, NO_PARENT
 
 pub(crate) struct Walker {
     excluded: Vec<PathBuf>,
+    seen: HashSet<(u64, u64)>,
 }
 
 impl Walker {
     pub fn new(excluded: &[PathBuf]) -> Walker {
-        Walker { excluded: excluded.to_vec() }
+        Walker { excluded: excluded.to_vec(), seen: HashSet::new() }
     }
 
     pub fn walk_root(&mut self, root: &Path, c: &mut Collector) -> RootReport {
@@ -37,7 +38,7 @@ impl Walker {
         }
         let root_idx = c.add_dir(display, NO_PARENT);
         report.node = Some(root_idx);
-        let mut seen: HashSet<(u64, u64)> = HashSet::new();
+        let seen = &mut self.seen;
         let mut stack = vec![(root_idx, std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf()))];
         while let Some((dir, path)) = stack.pop() {
             if c.cancelled() {
