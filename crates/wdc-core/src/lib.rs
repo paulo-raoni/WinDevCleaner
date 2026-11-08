@@ -4,12 +4,16 @@
 //! none has cleaning logic of its own. Slice 1 is read-only: nothing here changes the disk
 //! outside the tool's own data folder (snapshots and the activity log).
 
+pub mod act;
 pub mod activity;
 pub mod background;
 pub mod diff;
+pub mod explain;
+pub mod facts;
 pub mod fmt;
 pub mod i18n;
 pub mod link;
+pub mod rules;
 pub mod scan;
 pub mod scope;
 pub mod snapshot;

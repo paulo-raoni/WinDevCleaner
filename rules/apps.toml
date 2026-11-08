@@ -1,0 +1,35 @@
+# Other applications (plan, section 4.2).
+
+[[rule]]
+id = "steam-htmlcache"
+title = "Steam web cache"
+title_pt_br = "Cache web do Steam"
+class = "regenerable-cache"
+action = "quarantine"
+paths = ['%LOCALAPPDATA%\Steam\htmlcache']
+evidence = "The cache of Steam's built-in browser; Steam rebuilds it."
+evidence_pt_br = "O cache do navegador embutido do Steam; o Steam o reconstrói."
+source = "Steam support: clearing the web browser cache."
+cost = "Store and community pages load slower once."
+cost_pt_br = "As páginas da loja e da comunidade carregam mais devagar uma vez."
+last_verified = "2026-11-07"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["steam.exe", "steamwebhelper.exe"]
+
+[[rule]]
+id = "claude-desktop-data"
+title = "Claude desktop data and Cowork VM bundle"
+title_pt_br = "Dados do Claude desktop e pacote da VM do Cowork"
+class = "app-managed"
+action = "report-only"
+paths = ['%LOCALAPPDATA%\Claude-Data\**', '%APPDATA%\Claude\**']
+evidence = "Claude's own README.txt in Claude-Data says never to delete this folder. Observed 2026-11-07: the 8.6 GB Cowork bundle existed under two names that were hard links to one file; deleting one freed 0 bytes, and the app downloads it again."
+evidence_pt_br = "O próprio README.txt do Claude em Claude-Data diz para nunca apagar esta pasta. Observado em 2026-11-07: o pacote do Cowork de 8,6 GB existia com dois nomes que eram hard links do mesmo arquivo; apagar um liberou 0 bytes, e o app baixa de novo."
+source = "Claude-Data\\README.txt; observed on the owner's machine on 2026-11-07."
+cost = "The app breaks or downloads everything again."
+cost_pt_br = "O app quebra ou baixa tudo de novo."
+instructions = "In Claude: Settings > This computer > System > Storage, or Help > Troubleshooting > Clear Cache and Restart."
+instructions_pt_br = "No Claude: Configurações > Este computador > Sistema > Armazenamento, ou Ajuda > Solução de problemas > Limpar cache e reiniciar."
+last_verified = "2026-11-07"

@@ -414,6 +414,10 @@ fn measure_file(
         // GUARD-END(placeholder-zero)
     }
 
+    if c.collect_large && on_disk >= DEDUP_THRESHOLD {
+        c.large.push(TopFile { path: display_path(full), bytes_on_disk: on_disk, logical_bytes: length, links });
+    }
+
     // One count per file: a second name of a remembered file counts 0 bytes.
     // GUARD-BEGIN(hardlink-dedup)
     if on_disk >= DEDUP_THRESHOLD && !seen.insert((volume, e.file_id)) {

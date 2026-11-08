@@ -12,6 +12,8 @@ rust-version.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ruzstd.workspace = true
+toml.workspace = true
+regex-lite.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [
@@ -28,6 +30,8 @@ windows-sys = { workspace = true, features = [
     "Win32_Globalization",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Registry",
     "Win32_System_Com",
     "Win32_Foundation",
     "Wdk_System_Threading",

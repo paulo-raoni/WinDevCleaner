@@ -22,6 +22,8 @@ wdc-testkit = { path = "crates/wdc-testkit" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ruzstd = "0.9"
+toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
+regex-lite = "0.1"
 windows-sys = "0.61"
 # The MCP SDK moved from 0.x to 3.x in 20 months; the version is pinned (plan, section 6.2).
 rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io"] }
