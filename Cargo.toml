@@ -12,6 +12,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+authors = ["Paulo Raoni"]
 repository = "https://github.com/paulo-raoni/WinDevCleaner"
 rust-version = "1.85"
 
