@@ -17,13 +17,13 @@ use windows_sys::Win32::Security::Authorization::{
 };
 use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FlushFileBuffers, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE,
+    CreateFileW, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE,
     FILE_FLAG_OVERLAPPED, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
     SECURITY_SQOS_PRESENT,
 };
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId,
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeServerProcessId,
     PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
     PIPE_WAIT,
 };
@@ -139,7 +139,7 @@ pub fn accept(instance: OwnedHandle) -> io::Result<PipeConn> {
             e => return Err(io::Error::from_raw_os_error(e as i32)),
         }
     }
-    PipeConn::new(instance, true)
+    PipeConn::new(instance)
 }
 
 /// One end of a connected pipe. Reads are overlapped, so a waiting read never blocks a write
@@ -152,14 +152,13 @@ pub struct PipeConn {
     buf: Box<[u8; 64 * 1024]>,
     pending: bool,
     acc: Vec<u8>,
-    server: bool,
 }
 
 // SAFETY: the connection is used by one thread at a time; the handles are kernel objects.
 unsafe impl Send for PipeConn {}
 
 impl PipeConn {
-    fn new(h: OwnedHandle, server: bool) -> io::Result<PipeConn> {
+    fn new(h: OwnedHandle) -> io::Result<PipeConn> {
         Ok(PipeConn {
             h,
             read_ev: event()?,
@@ -168,7 +167,6 @@ impl PipeConn {
             buf: Box::new([0u8; 64 * 1024]),
             pending: false,
             acc: Vec::new(),
-            server,
         })
     }
 
@@ -262,11 +260,11 @@ impl Drop for PipeConn {
                 // Wait for the cancelled read before its buffer and OVERLAPPED are freed.
                 GetOverlappedResult(self.h.raw(), &*self.read_ov, &mut n, TRUE);
             }
-            if self.server {
-                FlushFileBuffers(self.h.raw());
-                DisconnectNamedPipe(self.h.raw());
-            }
         }
+        // The handle is just closed. FlushFileBuffers would wait until the other end has read
+        // everything, so an agent that stops reading could hold the app's session thread
+        // forever; DisconnectNamedPipe would discard what it has not read yet. After a close,
+        // the other end still reads what is buffered, then gets "pipe closed".
     }
 }
 
@@ -309,7 +307,7 @@ pub fn connect(name: &str) -> io::Result<Connect> {
         }
     };
     check_server_is_same_user(&h)?;
-    Ok(Connect::Connected(PipeConn::new(h, false)?))
+    Ok(Connect::Connected(PipeConn::new(h)?))
 }
 
 /// Refuses a pipe created by another user (a squatter impersonating the app).
