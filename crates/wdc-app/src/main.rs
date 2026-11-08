@@ -40,6 +40,14 @@ fn main() -> eframe::Result {
     // wake a discrete GPU for it.
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
         setup.power_preference = wgpu::PowerPreference::LowPower;
+        // Small GPU memory blocks (8 MiB device, 4 MiB host) instead of the 128/64 MiB ones
+        // wgpu reserves by default: a window of text and boxes needs a few megabytes, and on
+        // integrated GPUs and the software renderer those blocks are the process' own memory.
+        let base = setup.device_descriptor.clone();
+        setup.device_descriptor = std::sync::Arc::new(move |adapter| wgpu::DeviceDescriptor {
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            ..base(adapter)
+        });
         #[cfg(windows)]
         {
             setup.instance_descriptor.backends = wgpu::Backends::DX12;
