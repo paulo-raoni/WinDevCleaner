@@ -97,10 +97,20 @@ fn wait_for_volume(letter: char, present: bool) -> Result<(), String> {
 fn cold_cycle(vhd: &Path, letter: char) -> Result<(), String> {
     diskpart(&format!("select vdisk file=\"{}\"\ndetach vdisk\n", vhd.display()))?;
     wait_for_volume(letter, false)?;
-    diskpart(&format!(
-        "select vdisk file=\"{}\"\nattach vdisk\nselect partition 1 noerr\nassign letter={letter} noerr\n",
+    diskpart(&format!("select vdisk file=\"{}\"\nattach vdisk\n", vhd.display()))?;
+    if wait_for_volume(letter, true).is_ok() {
+        return Ok(());
+    }
+    // The mount manager did not give the letter back: assign it to the VHDX's partition.
+    let script = format!(
+        "$p = Get-DiskImage -ImagePath '{}' | Get-Disk | Get-Partition | Where-Object {{ $_.Type -ne 'Reserved' }} | Select-Object -First 1; \
+         Set-Partition -InputObject $p -NewDriveLetter {letter}",
         vhd.display()
-    ))?;
+    );
+    let out = Command::new("powershell").args(["-NoProfile", "-Command", &script]).output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+    }
     wait_for_volume(letter, true)
 }
 
