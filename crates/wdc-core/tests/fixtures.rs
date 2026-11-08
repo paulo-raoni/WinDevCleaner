@@ -164,7 +164,7 @@ fn sparse_files_count_their_allocation() {
 
     let r = scan_roots(&[&base]);
     println!("sparse: scanner {} bytes, Windows {expected} bytes", r.totals.bytes_on_disk);
-    guard_assert_eq!("size-on-disk, compressed-size", r.totals.bytes_on_disk, expected, "sparse files count what is allocated");
+    guard_assert_eq!("size-on-disk", r.totals.bytes_on_disk, expected, "sparse files count what is allocated");
     assert_eq!(r.totals.logical_bytes, 1056 * MIB);
     remove_tree(&base);
 }
@@ -172,15 +172,18 @@ fn sparse_files_count_their_allocation() {
 #[test]
 fn compressed_files_count_their_compressed_allocation() {
     let base = fresh_dir("compressed");
-    let f = base.join("log.txt");
-    compressed_file(&f, 16 * MIB);
-    let expected = compressed_size(&f);
-    assert!(expected < 8 * MIB, "NTFS compressed it to {expected} bytes");
+    // One below the 64 MB re-read threshold, one above it.
+    let small = base.join("log.txt");
+    let large = base.join("big.log");
+    compressed_file(&small, 16 * MIB);
+    compressed_file(&large, 80 * MIB);
+    let expected = compressed_size(&small) + compressed_size(&large);
+    assert!(expected < 48 * MIB, "NTFS compressed them to {expected} bytes");
 
     let r = scan_roots(&[&base]);
     println!("compressed: scanner {} bytes, Windows {expected} bytes", r.totals.bytes_on_disk);
-    guard_assert_eq!("compressed-size, size-on-disk", r.totals.bytes_on_disk, expected, "compressed files count what is allocated");
-    assert_eq!(r.totals.logical_bytes, 16 * MIB);
+    guard_assert_eq!("size-on-disk", r.totals.bytes_on_disk, expected, "compressed files count what is allocated");
+    assert_eq!(r.totals.logical_bytes, 96 * MIB);
     remove_tree(&base);
 }
 

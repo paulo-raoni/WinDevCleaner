@@ -27,7 +27,7 @@ CASES=(
   "root-link|wdc-core|fixtures|a_root_that_is_a_junction_is_recorded_and_not_followed"
   "size-on-disk|wdc-core|fixtures|a_plain_file_counts_its_allocation_not_its_length"
   "size-on-disk|wdc-core|fixtures|sparse_files_count_their_allocation"
-  "compressed-size|wdc-core|fixtures|compressed_files_count_their_compressed_allocation"
+  "size-on-disk|wdc-core|fixtures|compressed_files_count_their_compressed_allocation"
   "placeholder-zero|wdc-core|fixtures|offline_files_count_zero_and_are_never_opened"
   "background-mode|wdc-cli|million|a_million_files_stay_under_the_memory_and_time_limits_in_background_mode"
   "pause-gate|wdc-core|pipe|a_paused_agents_calls_wait_until_resumed"

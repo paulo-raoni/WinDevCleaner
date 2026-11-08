@@ -11,14 +11,13 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FileAttributeTagInfo, FileIdBothDirectoryInfo, FileIdExtdDirectoryInfo,
-    FileIdInfo, FileStandardInfo, GetCompressedFileSizeW, GetFileInformationByHandle,
-    GetFileInformationByHandleEx, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_COMPRESSED,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS,
-    FILE_ATTRIBUTE_RECALL_ON_OPEN, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE,
+    FileIdInfo, FileStandardInfo, GetFileInformationByHandle,
+    GetFileInformationByHandleEx, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS,
+    FILE_ATTRIBUTE_RECALL_ON_OPEN, FILE_ATTRIBUTE_REPARSE_POINT,
     FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_ID_BOTH_DIR_INFO, FILE_ID_EXTD_DIR_INFO, FILE_ID_INFO, FILE_LIST_DIRECTORY,
     FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FILE_STANDARD_INFO, INVALID_FILE_SIZE, OPEN_EXISTING, SYNCHRONIZE,
+    FILE_STANDARD_INFO, OPEN_EXISTING, SYNCHRONIZE,
 };
 
 use super::{Collector, LinkKind, RootReport, TopFile, DEDUP_THRESHOLD, NO_PARENT, VERIFY_THRESHOLD};
@@ -110,18 +109,6 @@ fn recheck(path: &[u16]) -> Option<Recheck> {
         length: info.EndOfFile as u64,
         links: info.NumberOfLinks,
     })
-}
-
-/// Bytes actually allocated to a compressed or sparse file (`GetCompressedFileSizeW`).
-fn compressed_size(path: &[u16]) -> Option<u64> {
-    let mut z = path.to_vec();
-    z.push(0);
-    let mut high = 0u32;
-    let low = unsafe { GetCompressedFileSizeW(z.as_ptr(), &mut high) };
-    if low == INVALID_FILE_SIZE && last_error() != 0 {
-        return None;
-    }
-    Some(((high as u64) << 32) | low as u64)
 }
 
 /// One directory entry, from either information class.
@@ -400,7 +387,9 @@ fn measure_file(
     let mut on_disk = e.length;
     let mut links = 1u32;
 
-    // Size on disk is the allocation, not the length.
+    // Size on disk is the allocation, not the length. For compressed and sparse files NTFS
+    // reports the bytes really allocated here (measured on the CI runner: equal to
+    // GetCompressedFileSizeW), so no per-file call is needed.
     // GUARD-BEGIN(size-on-disk)
     on_disk = e.allocation;
     // GUARD-END(size-on-disk)
@@ -415,15 +404,6 @@ fn measure_file(
             links = r.links;
         }
         // GUARD-END(large-file-recheck)
-    }
-
-    // Compressed and sparse files: the bytes really allocated.
-    if !placeholder && e.attributes & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE) != 0 {
-        // GUARD-BEGIN(compressed-size)
-        if let Some(size) = compressed_size(full) {
-            on_disk = size;
-        }
-        // GUARD-END(compressed-size)
     }
 
     // Cloud placeholders and offline files count 0 and are never read.
