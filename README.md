@@ -4,8 +4,8 @@ Finds where the disk space of a Windows developer machine went, so that an AI ag
 investigate and propose, and a human approves before anything is touched.
 
 The tool is being rebuilt in Rust, one vertical slice at a time, following
-[the rebuild plan](docs/rebuild-plan.md). **This version is slice 1, "Where is my space?": it
-is read-only.** It never changes anything on disk outside its own data folder.
+[the rebuild plan](docs/rebuild-plan.md). **This version has slices 1 and 2, "Where is my
+space?" and "What grew since last time?": it is read-only.** It never changes anything on disk outside its own data folder.
 
 ## What it does now
 
@@ -17,8 +17,15 @@ is read-only.** It never changes anything on disk outside its own data folder.
   and never followed; sparse and compressed files count what is allocated; cloud files that are
   not stored locally (OneDrive) count 0 and are never downloaded.
 - Each scan saves a compressed snapshot in `%LOCALAPPDATA%\WinDevCleaner\snapshots` (the last
-  10 are kept), for the "what grew" view of slice 2.
-- `WinDevCleaner.exe` shows the tree of sizes. When an AI agent connects through `wdc mcp`, the
+  10 are kept, and their total size is shown).
+- `wdc diff` shows what grew since the previous scan of the same folders: new and grown folders
+  first, each at the place that changed (not every parent of it), then removed and shrunk ones,
+  and the large files that are new or grew.
+- A scan of the default read scope also lists the system items Windows manages, read through
+  Windows' own APIs and always report-only: Recycle Bin, paging, swap and hibernation files,
+  error reports, crash and memory dumps, and System Restore (which only an administrator can
+  read). Each one names the Windows setting or tool that manages it.
+- `WinDevCleaner.exe` shows the tree of sizes, a "What grew?" view and the system items. When an AI agent connects through `wdc mcp`, the
   window shows "Agent connected: <name>", every call live in the activity panel, and "Pause
   agent" / "Disconnect agent" buttons.
 - English and Brazilian Portuguese (`--lang en|pt-BR`, or the Windows display language).
@@ -40,6 +47,8 @@ shortcut. Uninstall it from Settings > Apps.
 wdc scan                         # the default read scope
 wdc scan C:\Users\me\.vscode     # specific folders
 wdc scan --json                  # stable English JSON, for scripts and agents
+wdc diff                         # what grew since the previous scan of the same folders
+wdc diff --min-mb 100 --json
 wdc --lang pt-BR scan
 ```
 
@@ -51,8 +60,9 @@ Add `wdc mcp` as an MCP server (stdio) in your agent. For Claude Code:
 claude mcp add windevcleaner -- wdc mcp
 ```
 
-Codex and other MCP clients take the same command. Tools: `scan` and `tree` (drill into a
-folder of the latest scan). With the app open, every call runs in the app while you watch; with
+Codex and other MCP clients take the same command. Tools: `scan`, `tree` (drill into a
+folder of the latest scan), `diff` (what grew) and `system_items`. The app's view follows the
+agent: it shows the scan, the folder, the comparison or the system items the agent is reading. With the app open, every call runs in the app while you watch; with
 it closed, `wdc mcp` runs headless (`wdc mcp --show` opens the app first).
 
 ## Data folder
