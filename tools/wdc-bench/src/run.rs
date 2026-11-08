@@ -160,8 +160,10 @@ struct AppBudget {
     seconds_to_listen: f64,
     idle_cpu_percent_of_one_core: f64,
     idle_working_set_bytes: u64,
+    idle_private_working_set_bytes: u64,
     idle_private_bytes: u64,
     after_scan_working_set_bytes: u64,
+    after_scan_private_working_set_bytes: u64,
     after_scan_private_bytes: u64,
     peak_working_set_bytes: u64,
     peak_private_bytes: u64,
@@ -208,6 +210,7 @@ fn app_budget(args: &Args, root: &Path) -> AppBudget {
     b.idle_cpu_percent_of_one_core = idle_cpu(h, 10);
     let (ws, _, private, _) = wdc_testkit::memory(h);
     b.idle_working_set_bytes = ws;
+    b.idle_private_working_set_bytes = wdc_testkit::private_working_set(h);
     b.idle_private_bytes = private;
 
     // Load the 200k-file tree into the window through the agent link, as an agent would.
@@ -227,6 +230,7 @@ fn app_budget(args: &Args, root: &Path) -> AppBudget {
     std::thread::sleep(Duration::from_secs(3));
     let (ws, _, private, _) = wdc_testkit::memory(h);
     b.after_scan_working_set_bytes = ws;
+    b.after_scan_private_working_set_bytes = wdc_testkit::private_working_set(h);
     b.after_scan_private_bytes = private;
     b.after_scan_idle_cpu_percent_of_one_core = idle_cpu(h, 10);
     let (_, peak_ws, _, peak_private) = wdc_testkit::memory(h);
@@ -351,7 +355,11 @@ pub fn main() -> i32 {
         Err(e) => check(&mut checks, "cloud placeholders (untested: no sync root)", "n/a".into(), e.clone(), true),
     }
     if app.started {
-        let mem = app.idle_private_bytes.max(app.after_scan_private_bytes);
+        // The budget is read as Task Manager's "Memory" column (private working set), the
+        // owner's decision of 2026-11-08: on the runner the window is drawn by Windows' software
+        // renderer (no GPU), whose own allocations inflate private bytes; those are reported
+        // alongside for comparison.
+        let mem = app.idle_private_working_set_bytes.max(app.after_scan_private_working_set_bytes);
         check(
             &mut checks,
             "app idle CPU (10 s, before and after loading the 200k tree)",
@@ -361,14 +369,16 @@ pub fn main() -> i32 {
         );
         check(
             &mut checks,
-            "app memory while open (private bytes, idle and with the 200k tree)",
+            "app memory while open (private working set, as Task Manager shows it; idle and with the 200k tree)",
             format!("<= {} MiB", APP_MEMORY_BYTES / MIB),
             format!(
-                "{:.1} MiB idle, {:.1} MiB with the tree (working set {:.1} / {:.1} MiB)",
-                app.idle_private_bytes as f64 / MIB as f64,
-                app.after_scan_private_bytes as f64 / MIB as f64,
+                "{:.1} / {:.1} MiB (for comparison: working set {:.1} / {:.1} MiB, private bytes {:.1} / {:.1} MiB)",
+                app.idle_private_working_set_bytes as f64 / MIB as f64,
+                app.after_scan_private_working_set_bytes as f64 / MIB as f64,
                 app.idle_working_set_bytes as f64 / MIB as f64,
-                app.after_scan_working_set_bytes as f64 / MIB as f64
+                app.after_scan_working_set_bytes as f64 / MIB as f64,
+                app.idle_private_bytes as f64 / MIB as f64,
+                app.after_scan_private_bytes as f64 / MIB as f64
             ),
             mem <= APP_MEMORY_BYTES,
         );

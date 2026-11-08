@@ -336,6 +336,18 @@ pub fn memory(process: HANDLE) -> (u64, u64, u64, u64) {
     }
 }
 
+/// Private working set of a running process: its own pages in RAM, the figure Task Manager
+/// shows in its "Memory" column (`PROCESS_MEMORY_COUNTERS_EX2.PrivateWorkingSetSize`).
+pub fn private_working_set(process: HANDLE) -> u64 {
+    use windows_sys::Win32::System::ProcessStatus::PROCESS_MEMORY_COUNTERS_EX2;
+    unsafe {
+        let mut c: PROCESS_MEMORY_COUNTERS_EX2 = std::mem::zeroed();
+        c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32;
+        GetProcessMemoryInfo(process, &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS, c.cb);
+        c.PrivateWorkingSetSize as u64
+    }
+}
+
 /// Runs `f` on this thread while impersonating another local user (network logon).
 pub fn as_other_user<T>(user: &str, password: &str, f: impl FnOnce() -> T) -> T {
     use windows_sys::Win32::Security::{
