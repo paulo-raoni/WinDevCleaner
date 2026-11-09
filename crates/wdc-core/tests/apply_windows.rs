@@ -250,9 +250,16 @@ fn a_file_held_open_keeps_the_whole_folder_in_place() {
         assert_eq!(tree(&item), before, "{rule} ({tag}): the tree is identical");
         assert!(quarantine::list(&data).is_empty(), "{rule} ({tag}): nothing recorded in quarantine");
         let in_quarantine = if data.join("quarantine").exists() { tree(&data.join("quarantine")) } else { BTreeMap::new() };
+        // No copy of any part of the item: outside the top-level index, only folders (a failed
+        // rename may leave the empty `<plan-hash>\q` folders), and the index lists no entry.
+        let files: Vec<&String> = in_quarantine.keys().filter(|k| !k.ends_with('\\') && k.as_str() != "index.json").collect();
+        let index_entries = match std::fs::read_to_string(data.join("quarantine").join("index.json")) {
+            Ok(text) => serde_json::from_str::<Vec<serde_json::Value>>(&text).unwrap_or_else(|e| panic!("{rule} ({tag}): the index is not a JSON list: {e}: {text:?}")),
+            Err(_) => Vec::new(),
+        };
         assert!(
-            in_quarantine.values().all(|len| *len == 0) && !in_quarantine.keys().any(|k| k.ends_with("held.dat") || k.ends_with("big.bin")),
-            "{rule} ({tag}): no copy in quarantine: {in_quarantine:?}"
+            files.is_empty() && index_entries.is_empty(),
+            "{rule} ({tag}): no copy in quarantine: files {files:?}, index entries {index_entries:?}, whole tree {in_quarantine:?}"
         );
 
         // The program lets go: the same plan applies, and restore puts everything back.
