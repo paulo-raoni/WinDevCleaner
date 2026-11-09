@@ -41,7 +41,8 @@ struct WdcServer {
 const INSTRUCTIONS: &str = "WinDevCleaner finds where disk space is on Windows and cleans it safely. \
 `scan` measures sizes on disk (hard links counted once, links not followed, cloud files not downloaded) and \
 `tree` drills into a folder of the latest scan, `diff` shows what grew since the previous scan of the same folders, \
-`explain` says why a path is here, which rule knows it and what deleting it would free, \
+`explain` says why a path is here, which rule knows it and what deleting it would free \
+(for NVIDIA update artifacts it also gives `manual_steps`: the exact steps for the person, the tool never deletes them), \
 and `system_items` reports the space Windows manages (Recycle Bin, paging and hibernation files, dumps). \
 `plan` drafts what built-in rules may move to quarantine now, each item explained, and `quarantine` lists what is held. \
 You cannot apply, purge or restore: `request_apply` asks the person, who approves in the app with Windows Hello; \

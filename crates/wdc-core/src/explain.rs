@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use crate::act::{self, Forbid, Verdict};
 use crate::i18n::{Lang, Msg};
-use crate::rules::{canon, Action, Class, CondResult, Condition, Context, Found, Origin, RuleSet};
+use crate::rules::{canon, Action, Class, CondResult, Condition, Context, Found, Origin, Rule, RuleSet};
 use crate::scan::{scan, ScanOptions, DEDUP_THRESHOLD};
 
 /// A file of at least 1 MB with more than one name.
@@ -59,6 +59,71 @@ impl WhyNot {
             WhyNot::Forbidden { forbid } => lang.fmt(Msg::WhyForbidden, &[("why", forbid.text(lang))]),
         }
     }
+}
+
+/// Exact manual steps for an item the tool never deletes itself (version 1: NVIDIA update
+/// artifacts, which need administrator rights).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ManualSteps {
+    /// The artifact is not newer than the installed driver: how to remove it by hand.
+    Remove { command: String, parent: String },
+    /// Not to be deleted, and why (a newer artifact, or versions that could not be compared).
+    Keep { found: Found },
+}
+
+/// One numbered step; `command` is the line to copy, shown apart from the sentence.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ManualStep {
+    pub text: String,
+    pub command: Option<String>,
+}
+
+impl ManualSteps {
+    /// The steps in a language. The command line itself is never translated.
+    pub fn steps(&self, lang: Lang) -> Vec<ManualStep> {
+        let plain = |text: String| ManualStep { text, command: None };
+        match self {
+            ManualSteps::Remove { command, parent } => vec![
+                plain(lang.t(Msg::ManualCloseApp).into()),
+                plain(lang.t(Msg::ManualOpenPowerShell).into()),
+                ManualStep { text: lang.t(Msg::ManualRunCommand).into(), command: Some(command.clone()) },
+                plain(lang.fmt(Msg::ManualExplainAgain, &[("parent", parent)])),
+            ],
+            ManualSteps::Keep { found: Found::DriverNewer { artifact, installed } } => {
+                vec![plain(lang.fmt(Msg::ManualKeepNewer, &[("artifact", artifact), ("installed", installed)]))]
+            }
+            ManualSteps::Keep { found } => vec![plain(lang.fmt(Msg::ManualKeepUnknown, &[("why", &found.text(lang))]))],
+        }
+    }
+
+    /// The `manual_steps` of the JSON output: stable English, the command as its own element.
+    pub fn english(&self) -> Vec<String> {
+        self.steps(Lang::En).into_iter().flat_map(|s| std::iter::once(s.text).chain(s.command)).collect()
+    }
+}
+
+/// `Remove-Item` for `path`, quoted for PowerShell single quotes (a `'` is doubled).
+fn remove_command(path: &str) -> String {
+    format!("Remove-Item -LiteralPath '{}' -Recurse -Force", path.replace('\'', "''"))
+}
+
+/// The manual steps of the explained item, if its rule gives any: only `nvidia-ota-artifacts`,
+/// and the command only when the artifact is not newer than the installed driver.
+#[allow(unused_mut, unused_assignments)]
+fn manual_steps(rule: &Rule, require: &[CondResult], real_path: &str) -> Option<ManualSteps> {
+    if rule.id != "nvidia-ota-artifacts" || rule.origin != Origin::BuiltIn {
+        return None;
+    }
+    let cond = require.iter().find(|c| matches!(c.condition, Condition::DriverVersionNotNewer { .. }))?;
+    let mut give_command = true;
+    // GUARD-BEGIN(nvidia-steps)
+    give_command = cond.passed;
+    // GUARD-END(nvidia-steps)
+    if !give_command {
+        return Some(ManualSteps::Keep { found: cond.found.clone() });
+    }
+    let parent = std::path::Path::new(real_path).parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    Some(ManualSteps::Remove { command: remove_command(real_path), parent })
 }
 
 /// The rule part of an explanation.
@@ -110,6 +175,12 @@ pub struct Explanation {
     pub actionable: bool,
     /// Why not.
     pub why_not: Vec<WhyNot>,
+    /// Exact manual steps, for the items whose rule has them (NVIDIA update artifacts).
+    #[serde(skip)]
+    pub manual: Option<ManualSteps>,
+    /// The same steps in English, the command as its own element; absent for every other rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_steps: Option<Vec<String>>,
 }
 
 /// Explains `path`. `data_dir` locates the local rules and the quarantine folder.
@@ -242,6 +313,11 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
         why_not.push(WhyNot::Forbidden { forbid: f.clone() });
     }
     let actionable = why_not.is_empty();
+    let manual = rule.as_ref().and_then(|r| {
+        let real = final_path.clone().unwrap_or_else(|| crate::rules::native(&item).to_string_lossy().into_owned());
+        manual_steps(&r.full, &require_conditions, &real)
+    });
+    let manual_steps = manual.as_ref().map(|m| m.english());
     Explanation {
         path: path.to_string(),
         exists,
@@ -262,6 +338,8 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
         act_scope,
         actionable,
         why_not,
+        manual,
+        manual_steps,
     }
 }
 

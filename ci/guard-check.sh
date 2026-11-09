@@ -44,6 +44,7 @@ CASES=(
   "name-matches-regex|wdc-core|rules|vscode_guid_staging_folder_needs_a_day_and_no_reference"
   "older-than|wdc-core|rules|vscode_guid_staging_folder_needs_a_day_and_no_reference"
   "driver-version|wdc-core|rules|nvidia_artifacts_older_equal_and_newer_than_the_installed_driver"
+  "nvidia-steps|wdc-core|rules|nvidia_newer_unknown_and_unversioned_artifacts_get_no_command"
   "local-report-only|wdc-core|rules|a_local_rule_cannot_make_an_item_actionable"
   "local-origin|wdc-core|rules|a_local_rule_cannot_make_an_item_actionable"
   "unknown-flag|wdc-core|rules|large_folders_no_rule_knows_are_flagged"

@@ -212,6 +212,96 @@ fn nvidia_artifacts_older_equal_and_newer_than_the_installed_driver() {
     wdc_testkit::remove_tree(&f.base);
 }
 
+/// A fixture whose folder name holds an apostrophe, so the path needs PowerShell quoting.
+fn nvidia_ota(f: &Fixture) -> PathBuf {
+    f.program_data.join("NVIDIA Corporation").join("NVIDIA app").join("UpdateFramework").join("ota-artifacts")
+}
+
+#[test]
+fn nvidia_older_and_equal_artifacts_come_with_the_exact_manual_steps() {
+    let f = Fixture::new("rule-nvidia-steps-it's");
+    let ota = nvidia_ota(&f);
+    for name in ["NVIDIA-552.22-dch", "NVIDIA-560.94-dch"] {
+        write(&ota.join(name).join("setup.exe"), MIB);
+    }
+    let rules = RuleSet::built_in();
+    let ctx = f.ctx(&[], Some("32.0.15.6094"));
+    for name in ["NVIDIA-552.22-dch", "NVIDIA-560.94-dch"] {
+        let item = ota.join(name);
+        assert!(s(&item).contains('\''), "the fixture path holds an apostrophe: {}", s(&item));
+        // Asked about the folder, and about a file inside it: the same item, the same steps.
+        for asked in [item.clone(), item.join("setup.exe")] {
+            let e = explain(&s(&asked), &rules, &ctx, None);
+            assert!(!e.actionable, "{name}: report-only stays: never actionable");
+            assert_eq!(e.rule.as_ref().unwrap().action, Action::ReportOnly);
+            let steps = e.manual_steps.clone().unwrap_or_else(|| panic!("{name}: manual steps expected"));
+            let command = format!("Remove-Item -LiteralPath '{}' -Recurse -Force", s(&item).replace('\'', "''"));
+            assert!(command.contains("''"), "{command}");
+            assert_eq!(steps.len(), 5, "{steps:?}");
+            assert_eq!(steps[0], "Close the NVIDIA app.");
+            assert_eq!(steps[1], "Open PowerShell as administrator.");
+            assert_eq!(steps[3], command, "the command is its own element, exactly");
+            assert!(steps[4].contains("wdc explain") && steps[4].contains(&s(&ota)), "{steps:?}");
+            // The JSON the agents read carries the same array.
+            let json = serde_json::to_value(&e).unwrap();
+            assert_eq!(json["manual_steps"], serde_json::json!(steps));
+            // The wording follows the language; the command line never does.
+            let pt = e.manual.as_ref().unwrap().steps(wdc_core::i18n::Lang::PtBr);
+            assert_ne!(pt[0].text, steps[0]);
+            assert_eq!(pt[2].command.as_deref(), Some(command.as_str()));
+        }
+    }
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn nvidia_newer_unknown_and_unversioned_artifacts_get_no_command() {
+    let f = Fixture::new("rule-nvidia-nosteps");
+    let ota = nvidia_ota(&f);
+    write(&ota.join("NVIDIA-566.14-dch").join("setup.exe"), MIB);
+    write(&ota.join("NVIDIA-552.22-dch").join("setup.exe"), MIB);
+    write(&ota.join("no-version-here").join("blob.bin"), MIB);
+    let rules = RuleSet::built_in();
+    let installed = f.ctx(&[], Some("32.0.15.6094"));
+    let none = f.ctx(&[], None);
+    let cases = [
+        ("a newer artifact", "NVIDIA-566.14-dch", &installed, "pending update"),
+        ("no installed driver", "NVIDIA-552.22-dch", &none, "could not be compared"),
+        ("no version in the name", "no-version-here", &installed, "could not be compared"),
+    ];
+    for (what, name, ctx, reason) in cases {
+        let e = explain(&s(&ota.join(name)), &rules, ctx, None);
+        assert!(!e.actionable, "{what}");
+        let steps = e.manual_steps.clone().unwrap_or_else(|| panic!("{what}: a step saying not to delete it"));
+        guard_assert!("nvidia-steps", !steps.iter().any(|x| x.contains("Remove-Item")), "{what}: no delete command may be given: {steps:?}");
+        assert_eq!(steps.len(), 1, "{what}: {steps:?}");
+        assert!(steps[0].starts_with("Do not delete") && steps[0].contains(reason), "{what}: the step names the reason: {steps:?}");
+        assert!(matches!(e.manual, Some(wdc_core::explain::ManualSteps::Keep { .. })), "{what}");
+    }
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn only_the_nvidia_artifacts_have_manual_steps() {
+    let f = Fixture::new("rule-nosteps-others");
+    let rules = RuleSet::built_in();
+    let ctx = f.ctx(&[], Some("32.0.15.6094"));
+    let cache = f.roaming.join("Code").join("Code Cache");
+    write(&cache.join("index"), MIB);
+    let steam = f.local.join("Steam").join("htmlcache");
+    write(&steam.join("Cache").join("data_1"), MIB);
+    let dx = f.local.join("NVIDIA").join("DXCache");
+    write(&dx.join("a.nvph"), MIB);
+    for (what, path) in [("vscode-caches", &cache), ("steam-htmlcache", &steam), ("nvidia-shader-caches", &dx)] {
+        let e = explain(&s(path), &rules, &ctx, None);
+        assert_eq!(e.rule.as_ref().unwrap().id, what);
+        assert!(e.manual.is_none() && e.manual_steps.is_none(), "{what}: no manual steps");
+        let json = serde_json::to_value(&e).unwrap();
+        assert!(json.get("manual_steps").is_none(), "{what}: the field is absent, not empty");
+    }
+    wdc_testkit::remove_tree(&f.base);
+}
+
 #[test]
 fn shader_caches_steam_claude_and_windows_rules() {
     let f = Fixture::new("rule-others");

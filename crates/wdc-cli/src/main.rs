@@ -474,6 +474,15 @@ pub fn print_explanation(lang: Lang, e: &wdc_core::explain::Explanation) {
             }
         }
     }
+    if let Some(m) = &e.manual {
+        println!("  {}", lang.t(Msg::ExplainManualHeader));
+        for (n, step) in m.steps(lang).iter().enumerate() {
+            println!("    {}. {}", n + 1, step.text);
+            if let Some(command) = &step.command {
+                println!("         {command}");
+            }
+        }
+    }
     if !e.match_conditions.is_empty() || !e.require_conditions.is_empty() {
         println!("  {}", lang.t(Msg::ExplainConditions));
         for c in e.match_conditions.iter().chain(&e.require_conditions) {
