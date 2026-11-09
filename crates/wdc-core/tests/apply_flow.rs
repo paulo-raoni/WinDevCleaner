@@ -477,8 +477,13 @@ fn restore_refuses_when_the_folder_was_recreated_for_every_quarantine_rule() {
         if !matches!(r, Err(quarantine::RestoreRefusal::OriginalExists { .. })) {
             failures.push(format!("{id}: restore must stop and report both paths: {r:?}"));
         }
-        assert_eq!(tree(&f.item).len(), 1, "{id}: the recreated folder is untouched");
-        assert_eq!(quarantine::list(&f.data).len(), 1, "{id}: the quarantined copy is kept");
+        let (items, kept) = (tree(&f.item).len(), quarantine::list(&f.data).len());
+        if items != 1 {
+            failures.push(format!("{id}: the recreated folder is untouched: {items} files found, expected 1"));
+        }
+        if kept != 1 {
+            failures.push(format!("{id}: the quarantined copy is kept: {kept} entries found, expected 1"));
+        }
         wdc_testkit::remove_tree(&f.base);
     }
     guard_assert!("restore-free-path", failures.is_empty(), "{failures:#?}");
@@ -507,7 +512,13 @@ fn an_item_replaced_after_planning_is_skipped_for_every_quarantine_rule() {
         if r.moved != 0 || !skipped_as_changed {
             failures.push(format!("{id}: another folder with the same name is not the planned item: {:#?}", r.items));
         }
-        assert!(away.exists() && f.item.exists(), "{id}: nothing was moved or removed");
+        if !(away.exists() && f.item.exists()) {
+            failures.push(format!(
+                "{id}: nothing was moved or removed: elsewhere exists = {}, item exists = {}",
+                away.exists(),
+                f.item.exists()
+            ));
+        }
         wdc_testkit::remove_tree(&f.base);
     }
     guard_assert!("apply-file-id", failures.is_empty(), "{failures:#?}");
