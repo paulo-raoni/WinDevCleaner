@@ -48,6 +48,20 @@ CASES=(
   "local-origin|wdc-core|rules|a_local_rule_cannot_make_an_item_actionable"
   "unknown-flag|wdc-core|rules|large_folders_no_rule_knows_are_flagged"
   "expected-freed|wdc-core|rules|the_cowork_case_two_names_one_outside_expected_freed_zero"
+  "plan-age|wdc-core|apply_flow|a_plan_older_than_a_day_or_edited_is_refused_whole"
+  "apply-file-id|wdc-core|apply_flow|an_item_replaced_after_planning_is_skipped"
+  "apply-conditions|wdc-core|apply_flow|a_condition_that_became_false_skips_the_item"
+  "apply-conditions|wdc-cli|apply_cli|a_program_started_after_planning_keeps_its_item"
+  "apply-verdict|wdc-core|apply_flow|forbidden_places_and_non_items_are_refused_on_the_real_path"
+  "apply-verdict|wdc-core|apply_windows|forbidden_places_are_refused_however_the_path_is_written"
+  "apply-rematch|wdc-core|apply_flow|forbidden_places_and_non_items_are_refused_on_the_real_path"
+  "apply-link|wdc-core|apply_windows|a_junction_planned_or_swapped_in_moves_nothing"
+  "quarantine-plain|wdc-core|apply_windows|a_quarantine_folder_that_is_a_link_is_refused"
+  "restore-free-path|wdc-core|apply_flow|restore_refuses_when_the_folder_was_recreated"
+  "purge-age|wdc-core|apply_flow|early_purge_is_only_for_caches_and_leftovers_that_were_explained"
+  "early-purge-class|wdc-core|apply_flow|early_purge_is_only_for_caches_and_leftovers_that_were_explained"
+  "early-purge-class|wdc-cli|apply_cli|purge_before_seven_days_is_only_for_caches_and_leftovers_on_both_paths"
+  "presence-code|wdc-cli|apply_cli|apply_with_the_desktop_code_then_restore_gives_the_identical_tree"
 )
 
 run_test() { # package target name log

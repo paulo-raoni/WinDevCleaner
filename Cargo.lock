@@ -3303,8 +3303,11 @@ dependencies = [
  "ruzstd",
  "serde",
  "serde_json",
+ "sha2",
  "toml",
  "wdc-testkit",
+ "windows",
+ "windows-future",
  "windows-sys 0.61.2",
 ]
 

@@ -2,8 +2,9 @@
 //! (by the human or by an agent) run on worker threads in background mode.
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use eframe::egui;
 use serde_json::Value;
@@ -11,6 +12,9 @@ use serde_json::Value;
 use wdc_core::activity::{self, Status, What};
 use wdc_core::i18n::{Lang, Msg};
 use wdc_core::link::{AgentHandler, LinkControl};
+use wdc_core::plan::{Draft, Plan};
+use wdc_core::presence::{self, Method, Proof};
+use wdc_core::quarantine::{self, Entry as QEntry};
 use wdc_core::scan::{Progress, ScanReport};
 use wdc_core::tools;
 
@@ -43,6 +47,27 @@ pub enum View {
     Growth,
     System,
     Explain,
+    Plan,
+    Quarantine,
+}
+
+/// The person's answer on the approval card.
+pub enum Decision {
+    Approve(Proof),
+    Reject,
+}
+
+/// A plan waiting for the person's approval (plan, sections 4.6 and 7).
+pub struct Approval {
+    pub plan: Arc<Plan>,
+    pub purge_now: bool,
+    /// The agent that asked, or None when the person started it.
+    pub agent: Option<String>,
+    /// Windows Hello is set up: the card approves with it, else with the click itself.
+    pub hello: bool,
+    /// Windows Hello is asking now.
+    pub busy: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Default)]
@@ -59,6 +84,14 @@ pub struct Shared {
     pub focus: Option<u32>,
     pub focus_seq: u64,
     pub link_error: Option<String>,
+    pub draft: Option<Result<Arc<Draft>, String>>,
+    pub approval: Option<Approval>,
+    pub last_apply: Option<Arc<wdc_core::apply::ApplyReport>>,
+    pub quarantine: Option<Arc<Vec<QEntry>>>,
+    /// The result of the latest restore or purge, as a sentence.
+    pub last_change: Option<String>,
+    /// A plan, restore or purge is running.
+    pub busy: bool,
 }
 
 pub struct AppCore {
@@ -70,6 +103,18 @@ pub struct AppCore {
     pub control: Arc<LinkControl>,
     /// One scan at a time, whoever starts it.
     scan_lock: Mutex<()>,
+    /// Where the approval card sends the person's answer.
+    decision: Mutex<Option<mpsc::Sender<Decision>>>,
+}
+
+/// How long an approval card waits for the person.
+fn approval_timeout() -> Duration {
+    let secs = std::env::var("WDC_APPROVAL_TIMEOUT_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(300u64);
+    Duration::from_secs(secs.clamp(1, 3600))
+}
+
+fn now_secs() -> u64 {
+    wdc_core::time::now_unix_ms() / 1000
 }
 
 impl AppCore {
@@ -82,7 +127,201 @@ impl AppCore {
             shared: Mutex::new(Shared::default()),
             control: LinkControl::new(),
             scan_lock: Mutex::new(()),
+            decision: Mutex::new(None),
         }
+    }
+
+    /// Drafts a plan (by the person or an agent) and shows it.
+    pub fn draft_plan(&self, opts: &wdc_core::plan::DraftOptions) -> Result<Value, String> {
+        let _background = wdc_core::background::ThreadBackground::enter();
+        let result = tools::run_plan(opts, &self.data_dir);
+        let value = result.as_ref().map(|(d, file)| tools::plan_json(d, file)).map_err(|e| e.clone());
+        {
+            let mut s = self.shared.lock().unwrap();
+            s.draft = Some(result.map(|(d, _)| Arc::new(d)));
+            s.view = View::Plan;
+        }
+        self.ctx.request_repaint();
+        value
+    }
+
+    pub fn start_draft(self: &Arc<Self>) {
+        let me = self.clone();
+        std::thread::Builder::new()
+            .name("plan".into())
+            .spawn(move || {
+                let _ = me.draft_plan(&wdc_core::plan::DraftOptions::default());
+            })
+            .ok();
+    }
+
+    /// Shows the approval card and waits for the person, the timeout, or the agent leaving.
+    /// None when nobody answered.
+    fn ask_approval(&self, plan: Arc<Plan>, purge_now: bool, agent: Option<String>, cancel: Option<&AtomicBool>) -> Result<Option<Decision>, String> {
+        let (tx, rx) = mpsc::channel();
+        {
+            let mut d = self.decision.lock().unwrap();
+            if d.is_some() {
+                return Err("another approval is already waiting for the person".into());
+            }
+            *d = Some(tx);
+        }
+        let hello = presence::hello_available();
+        {
+            let mut s = self.shared.lock().unwrap();
+            s.approval = Some(Approval { plan, purge_now, agent, hello, busy: false, error: None });
+            s.view = View::Plan;
+        }
+        self.ctx.request_repaint();
+        let deadline = Instant::now() + approval_timeout();
+        let answer = loop {
+            if cancel.is_some_and(|c| c.load(Ordering::SeqCst)) || Instant::now() >= deadline {
+                break None;
+            }
+            match rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(d) => break Some(d),
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break None,
+            }
+        };
+        *self.decision.lock().unwrap() = None;
+        self.shared.lock().unwrap().approval = None;
+        self.ctx.request_repaint();
+        Ok(answer)
+    }
+
+    /// The card's Approve button: Windows Hello when set up, else the click is the proof.
+    pub fn approve(self: &Arc<Self>) {
+        let (hello, message) = {
+            let mut s = self.shared.lock().unwrap();
+            let Some(a) = s.approval.as_mut() else { return };
+            if a.busy {
+                return;
+            }
+            a.error = None;
+            a.busy = a.hello;
+            let lang = *self.lang.lock().unwrap();
+            let msg = lang.fmt(
+                Msg::CliApplyWhat,
+                &[("n", &a.plan.items.len().to_string()), ("size", &wdc_core::fmt::bytes(a.plan.bytes_on_disk())), ("hash", a.plan.short_hash())],
+            );
+            (a.hello, msg)
+        };
+        if !hello {
+            self.send_decision(Decision::Approve(Proof::new(Method::AppApproval)));
+            return;
+        }
+        let hwnd = presence::foreground_window();
+        let me = self.clone();
+        std::thread::Builder::new()
+            .name("hello".into())
+            .spawn(move || match presence::hello(hwnd, &message) {
+                Ok(p) => me.send_decision(Decision::Approve(p)),
+                Err(e) => {
+                    let lang = me.lang();
+                    if let Some(a) = me.shared.lock().unwrap().approval.as_mut() {
+                        a.busy = false;
+                        a.error = Some(e.text(lang));
+                    }
+                    me.ctx.request_repaint();
+                }
+            })
+            .ok();
+    }
+
+    pub fn reject(&self) {
+        self.send_decision(Decision::Reject);
+    }
+
+    fn send_decision(&self, d: Decision) {
+        if let Some(tx) = self.decision.lock().unwrap().as_ref() {
+            let _ = tx.send(d);
+        }
+    }
+
+    fn run_apply(&self, plan: &Plan, purge_now: bool, proof: &Proof) -> Result<Arc<wdc_core::apply::ApplyReport>, String> {
+        let _background = wdc_core::background::ThreadBackground::enter();
+        let opts = wdc_core::apply::ApplyOptions { purge_now, explained: true };
+        let rules = wdc_core::rules::RuleSet::built_in();
+        let ctx = wdc_core::rules::Context::system();
+        let r = wdc_core::apply::apply(plan, &rules, &ctx, &self.data_dir, &opts, proof, now_secs())
+            .map(Arc::new)
+            .map_err(|r| r.0.text(self.lang()));
+        {
+            let mut s = self.shared.lock().unwrap();
+            if let Ok(rep) = &r {
+                s.last_apply = Some(rep.clone());
+            }
+            s.quarantine = Some(Arc::new(quarantine::list(&self.data_dir)));
+        }
+        self.ctx.request_repaint();
+        r
+    }
+
+    /// The person's "Move to quarantine" on the drafted plan: the same card, then apply.
+    pub fn start_human_apply(self: &Arc<Self>, purge_now: bool) {
+        let plan = match self.shared.lock().unwrap().draft.as_ref() {
+            Some(Ok(d)) => Arc::new(d.plan.clone()),
+            _ => return,
+        };
+        let me = self.clone();
+        std::thread::Builder::new()
+            .name("apply".into())
+            .spawn(move || {
+                if let Ok(Some(Decision::Approve(proof))) = me.ask_approval(plan.clone(), purge_now, None, None) {
+                    let _ = me.run_apply(&plan, purge_now, &proof);
+                }
+            })
+            .ok();
+    }
+
+    pub fn refresh_quarantine(&self) {
+        self.shared.lock().unwrap().quarantine = Some(Arc::new(quarantine::list(&self.data_dir)));
+        self.ctx.request_repaint();
+    }
+
+    /// Restore or purge from the quarantine view. The click is made by the person in the app;
+    /// Windows Hello is asked too when it is set up.
+    pub fn start_quarantine_change(self: &Arc<Self>, restore: Option<String>, early: bool) {
+        let me = self.clone();
+        let hwnd = presence::foreground_window();
+        self.shared.lock().unwrap().busy = true;
+        std::thread::Builder::new()
+            .name("quarantine".into())
+            .spawn(move || {
+                let lang = me.lang();
+                let proof = if presence::hello_available() {
+                    presence::hello(hwnd, lang.t(Msg::AppTabQuarantine))
+                } else {
+                    Ok(Proof::new(Method::AppApproval))
+                };
+                let text = match proof {
+                    Err(e) => e.text(lang),
+                    Ok(proof) => match &restore {
+                        Some(id) => {
+                            let r = quarantine::restore(&me.data_dir, id, &wdc_core::rules::Context::system(), &proof);
+                            wdc_core::apply::log(&me.data_dir, "restore", &serde_json::json!({ "id": id, "result": r.as_ref().map(|e| &e.original) }));
+                            match r {
+                                Ok(e) => lang.fmt(Msg::CliRestored, &[("path", &e.original)]),
+                                Err(why) => lang.fmt(Msg::CliRefused, &[("why", &why.text(lang))]),
+                            }
+                        }
+                        None => {
+                            let r = quarantine::purge(&me.data_dir, None, early, now_secs(), &proof);
+                            wdc_core::apply::log(&me.data_dir, "purge", &r);
+                            let n = r.items.iter().filter(|i| i.purged).count();
+                            lang.fmt(Msg::CliPurged, &[("n", &n.to_string()), ("size", &wdc_core::fmt::bytes(r.purged_bytes))])
+                        }
+                    },
+                };
+                let mut s = me.shared.lock().unwrap();
+                s.busy = false;
+                s.last_change = Some(text);
+                s.quarantine = Some(Arc::new(quarantine::list(&me.data_dir)));
+                drop(s);
+                me.ctx.request_repaint();
+            })
+            .ok();
     }
 
     pub fn lang(&self) -> Lang {
@@ -214,6 +453,7 @@ fn call_target(tool: &str, args: &Value) -> String {
         tools::TREE => args.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
         tools::DIFF | tools::SYSTEM_ITEMS => String::new(),
         tools::EXPLAIN => args.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
+        tools::REQUEST_APPLY => args.get("plan").and_then(Value::as_str).unwrap_or_default().to_string(),
         _ => String::new(),
     }
 }
@@ -309,6 +549,34 @@ impl AgentHandler for AppCore {
                 self.ctx.request_repaint();
                 value
             }
+            tools::PLAN => {
+                let opts = tools::parse_plan_args(args)?;
+                self.draft_plan(&opts)
+            }
+            tools::QUARANTINE => {
+                let value = tools::run_quarantine(&self.data_dir);
+                self.refresh_quarantine();
+                self.set_view(View::Quarantine);
+                Ok(value)
+            }
+            tools::REQUEST_APPLY => {
+                let (hash, purge_now) = tools::parse_request_apply_args(args)?;
+                let plan = Plan::find_in(&self.data_dir, &hash)?;
+                if let Some(r) = plan.refusal(now_secs()) {
+                    return Ok(serde_json::json!({ "status": "refused", "reason": r, "changed": false }));
+                }
+                let plan = Arc::new(plan);
+                let client = self.control.state().client.unwrap_or_default();
+                // The agent waits here while the person decides on the card.
+                match self.ask_approval(plan.clone(), purge_now, Some(client), Some(cancel))? {
+                    Some(Decision::Approve(proof)) => {
+                        let report = self.run_apply(&plan, purge_now, &proof)?;
+                        Ok(serde_json::json!({ "status": "approved", "changed": report.moved > 0, "report": report.as_ref() }))
+                    }
+                    Some(Decision::Reject) => Ok(serde_json::json!({ "status": "rejected", "changed": false })),
+                    None => Ok(serde_json::json!({ "status": "timed-out", "changed": false })),
+                }
+            }
             other => Err(format!("unknown tool `{other}`")),
         }
     }
@@ -329,6 +597,8 @@ impl AgentHandler for AppCore {
                 } else if let Some(delta) = v.get("delta_bytes").and_then(Value::as_i64) {
                     let sign = if delta < 0 { "-" } else { "+" };
                     format!("{sign}{}", wdc_core::fmt::bytes(delta.unsigned_abs()))
+                } else if let Some(status) = v.get("status").and_then(Value::as_str) {
+                    status.to_string()
                 } else if let Some(bytes) = v.get("total_bytes").and_then(Value::as_u64) {
                     wdc_core::fmt::bytes(bytes)
                 } else if let Some(bytes) = v.get("bytes_on_disk").and_then(Value::as_u64) {
@@ -349,6 +619,8 @@ impl AgentHandler for AppCore {
                         "delta_bytes": v["delta_bytes"],
                         "changes": v["dirs"].as_array().map(|a| a.len()).unwrap_or(0),
                     }))
+                } else if v.get("status").is_some() {
+                    Some(serde_json::json!({ "status": v["status"], "changed": v["changed"] }))
                 } else if v.get("total_bytes").is_some() {
                     Some(serde_json::json!({ "total_bytes": v["total_bytes"] }))
                 } else {

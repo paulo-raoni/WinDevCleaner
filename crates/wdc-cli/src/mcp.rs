@@ -38,11 +38,14 @@ struct WdcServer {
     backend: Arc<Mutex<Backend>>,
 }
 
-const INSTRUCTIONS: &str = "WinDevCleaner finds where disk space is on Windows. This version is read-only: \
+const INSTRUCTIONS: &str = "WinDevCleaner finds where disk space is on Windows and cleans it safely. \
 `scan` measures sizes on disk (hard links counted once, links not followed, cloud files not downloaded) and \
 `tree` drills into a folder of the latest scan, `diff` shows what grew since the previous scan of the same folders, \
 `explain` says why a path is here, which rule knows it and what deleting it would free, \
-and `system_items` reports the space Windows manages (Recycle Bin, paging and hibernation files, dumps). When the WinDevCleaner app is open, the user watches every \
+and `system_items` reports the space Windows manages (Recycle Bin, paging and hibernation files, dumps). \
+`plan` drafts what built-in rules may move to quarantine now, each item explained, and `quarantine` lists what is held. \
+You cannot apply, purge or restore: `request_apply` asks the person, who approves in the app with Windows Hello; \
+with the app closed it returns `needs-human` and nothing changes. When the WinDevCleaner app is open, the user watches every \
 call live in the app and can pause or disconnect you.";
 
 impl WdcServer {
@@ -144,6 +147,17 @@ fn run_call(backend: &mut Backend, tool: &str, args: Value) -> Result<Value, Str
                 let path = tools::parse_explain_args(&args)?;
                 let e = tools::run_explain(&path, &wdc_core::scope::data_dir());
                 serde_json::to_value(e).map_err(|e| e.to_string())
+            }
+            tools::PLAN => {
+                let opts = tools::parse_plan_args(&args)?;
+                let (d, file) = tools::run_plan(&opts, &wdc_core::scope::data_dir())?;
+                Ok(tools::plan_json(&d, &file))
+            }
+            tools::QUARANTINE => Ok(tools::run_quarantine(&wdc_core::scope::data_dir())),
+            // Without the app there is no person to ask: nothing changes, ever.
+            tools::REQUEST_APPLY => {
+                let (plan, _) = tools::parse_request_apply_args(&args)?;
+                Ok(tools::needs_human(&plan))
             }
             other => Err(format!("unknown tool `{other}`")),
         },

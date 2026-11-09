@@ -95,6 +95,9 @@ pub struct Explanation {
     /// What deleting the item would free: files with a name outside the item count 0.
     pub expected_freed_bytes: u64,
     pub hard_links: Vec<HardLinked>,
+    /// Every file of at least 1 MB inside the item (a plan records their file IDs).
+    #[serde(skip)]
+    pub large_files: Vec<String>,
     pub rule: Option<RuleInfo>,
     /// No rule knows this path.
     pub unknown: bool,
@@ -103,7 +106,7 @@ pub struct Explanation {
     /// Programs the rule waits for that are running now.
     pub running_owners: Vec<String>,
     pub act_scope: Verdict,
-    /// Whether a plan (slice 4) could include this item now.
+    /// Whether a plan could include this item now.
     pub actionable: bool,
     /// Why not.
     pub why_not: Vec<WhyNot>,
@@ -134,6 +137,7 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
     let mut files = 0;
     let mut hard_links = Vec::new();
     let mut outside_bytes = 0u64;
+    let mut large_files = Vec::new();
     if exists && kind != "link" {
         let report = scan(&ScanOptions { roots: vec![item_native.clone()], top_files: 0, collect_large: true, ..Default::default() }, None, None);
         bytes_on_disk = report.totals.bytes_on_disk;
@@ -143,6 +147,7 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
         // not with the text given (which may use short names such as RUNNER~1).
         let item_key = canon(final_path.as_deref().unwrap_or(&item)).to_lowercase();
         let mut seen = std::collections::HashSet::new();
+        large_files = report.large_files.iter().filter(|f| f.bytes_on_disk >= DEDUP_THRESHOLD).map(|f| f.path.clone()).collect();
         for f in report.large_files.iter().filter(|f| f.bytes_on_disk >= DEDUP_THRESHOLD) {
             let Some((links, names)) = platform::names(&f.path) else { continue };
             if links <= 1 {
@@ -248,6 +253,7 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
         files,
         expected_freed_bytes,
         hard_links,
+        large_files,
         unknown: rule.is_none(),
         rule,
         match_conditions,

@@ -5,7 +5,11 @@
 //! test never checks the scanner against itself.
 
 #[cfg(windows)]
+mod change;
+#[cfg(windows)]
 mod imp;
+#[cfg(windows)]
+pub use change::*;
 #[cfg(windows)]
 pub use imp::*;
 

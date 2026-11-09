@@ -53,6 +53,10 @@ jobs:
         run: cargo test --release --locked -p wdc-core --test pipe -- --ignored --exact another_user_cannot_open_the_pipe --nocapture
       - name: An MCP client drives a scan and the app mirrors it
         run: cargo test --release --locked -p wdc-app --test mcp_mirror -- --ignored --nocapture
+      - name: Apply on Windows (links, short names, trailing dots, a VHDX volume, free space)
+        run: cargo test --release --locked -p wdc-core --test apply_windows -- --ignored --nocapture --test-threads=1
+      - name: wdc apply end to end (presence code, ConPTY, a program started after planning, purge)
+        run: cargo test --release --locked -p wdc-cli --test apply_cli -- --ignored --nocapture --test-threads=1
       - name: 1,000,000 files under the limits, in background mode
         env:
           WDC_REPORT_DIR: ${{ github.workspace }}\ci-out

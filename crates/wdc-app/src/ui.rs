@@ -54,6 +54,9 @@ fn describe(lang: Lang, e: &Entry) -> String {
             wdc_core::tools::DIFF => lang.t(Msg::AppActDiff).to_string(),
             wdc_core::tools::SYSTEM_ITEMS => lang.t(Msg::AppActSystem).to_string(),
             wdc_core::tools::EXPLAIN => lang.fmt(Msg::AppActExplain, &[("path", target)]),
+            wdc_core::tools::PLAN => lang.t(Msg::AppActPlan).to_string(),
+            wdc_core::tools::QUARANTINE => lang.t(Msg::AppActQuarantine).to_string(),
+            wdc_core::tools::REQUEST_APPLY => lang.fmt(Msg::AppActRequestApply, &[("hash", target)]),
             other => format!("{other} {target}"),
         },
     }
@@ -204,8 +207,13 @@ impl eframe::App for WdcApp {
                     (View::Growth, Msg::AppTabGrowth),
                     (View::System, Msg::AppTabSystem),
                     (View::Explain, Msg::AppTabExplain),
+                    (View::Plan, Msg::AppTabPlan),
+                    (View::Quarantine, Msg::AppTabQuarantine),
                 ] {
                     if ui.selectable_label(view == v, RichText::new(lang.t(label)).heading()).clicked() {
+                        if v == View::Quarantine {
+                            core.refresh_quarantine();
+                        }
                         core.set_view(v);
                     }
                 }
@@ -222,6 +230,14 @@ impl eframe::App for WdcApp {
                 }
                 View::Explain => {
                     explain_view(ui, lang, &core);
+                    return;
+                }
+                View::Plan => {
+                    plan_view(ui, lang, &core);
+                    return;
+                }
+                View::Quarantine => {
+                    quarantine_view(ui, lang, &core);
                     return;
                 }
                 View::Space => {}
@@ -473,6 +489,193 @@ fn explain_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
             for w in &e.why_not {
                 ui.label(format!("• {}", w.text(lang)));
             }
+        }
+    });
+}
+
+const GREEN: Color32 = Color32::from_rgb(0x27, 0xae, 0x60);
+const ORANGE: Color32 = Color32::from_rgb(0xd9, 0x8c, 0x00);
+const RED: Color32 = Color32::from_rgb(0xeb, 0x57, 0x57);
+
+fn rule_of(id: &str) -> Option<wdc_core::rules::Rule> {
+    wdc_core::rules::RuleSet::built_in().rules.into_iter().find(|r| r.id == id)
+}
+
+/// The items of a plan, each with its rule and evidence: what the person approves.
+fn plan_items(ui: &mut egui::Ui, lang: Lang, plan: &wdc_core::plan::Plan) {
+    ui.label(
+        RichText::new(lang.fmt(
+            Msg::CliPlanHeader,
+            &[
+                ("hash", plan.short_hash()),
+                ("n", &plan.items.len().to_string()),
+                ("size", &fmt::bytes(plan.bytes_on_disk())),
+                ("freed", &fmt::bytes(plan.expected_freed_bytes())),
+                ("at", &wdc_core::time::rfc3339(plan.created_at * 1000)),
+            ],
+        ))
+        .strong(),
+    );
+    for i in &plan.items {
+        ui.add_space(4.0);
+        ui.label(RichText::new(&i.path).monospace());
+        let rule = rule_of(&i.rule_id);
+        let title = rule.as_ref().map(|r| r.title(lang).to_string()).unwrap_or_else(|| i.rule_id.clone());
+        ui.label(format!(
+            "{}  ·  {}  ·  {}  ·  {}",
+            fmt::bytes(i.bytes_on_disk),
+            lang.fmt(Msg::CliPlanFrees, &[("size", &fmt::bytes(i.expected_freed_bytes))]),
+            title,
+            i.class.text(lang)
+        ));
+        if let Some(r) = &rule {
+            ui.label(RichText::new(lang.fmt(Msg::ExplainEvidence, &[("text", r.evidence(lang))])).weak());
+            ui.label(RichText::new(lang.fmt(Msg::ExplainCost, &[("text", r.cost(lang))])).weak());
+        }
+    }
+}
+
+/// "Plan": the approval card when one waits, else the drafted plan and the last result.
+fn plan_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        let card = {
+            let s = core.shared.lock().unwrap();
+            s.approval.as_ref().map(|a| (a.plan.clone(), a.purge_now, a.agent.clone(), a.hello, a.busy, a.error.clone()))
+        };
+        if let Some((plan, purge_now, agent, hello, busy, error)) = card {
+            egui::Frame::group(ui.style()).stroke(egui::Stroke::new(2.0, ORANGE)).show(ui, |ui| {
+                let title = match &agent {
+                    Some(a) => lang.fmt(Msg::AppApprovalTitle, &[("client", a)]),
+                    None => lang.t(Msg::AppApprovalTitleYou).to_string(),
+                };
+                ui.heading(RichText::new(title).color(ORANGE));
+                ui.label(lang.t(if purge_now { Msg::CliApplyAskPurge } else { Msg::CliApplyAsk }));
+                ui.separator();
+                plan_items(ui, lang, &plan);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    let label = lang.t(if hello { Msg::AppApproveHello } else { Msg::AppApproveClick });
+                    if ui.add_enabled(!busy, egui::Button::new(RichText::new(label).strong())).clicked() {
+                        core.approve();
+                    }
+                    if ui.add_enabled(!busy, egui::Button::new(lang.t(Msg::AppReject))).clicked() {
+                        core.reject();
+                    }
+                    if busy {
+                        ui.spinner();
+                        ui.label(lang.t(Msg::PresenceHelloPrompt));
+                    }
+                });
+                if let Some(e) = error {
+                    ui.label(RichText::new(e).color(RED));
+                }
+            });
+            ui.add_space(8.0);
+        }
+
+        let (draft, last, busy) = {
+            let s = core.shared.lock().unwrap();
+            (s.draft.clone(), s.last_apply.clone(), s.approval.is_some())
+        };
+        if let Some(r) = last {
+            ui.label(RichText::new(lang.fmt(Msg::CliApplyMoved, &[("n", &r.moved.to_string()), ("size", &fmt::bytes(r.moved_bytes))])).strong().color(GREEN));
+            for it in &r.items {
+                if let Some(sk) = &it.skipped {
+                    ui.label(RichText::new(lang.fmt(Msg::CliSkipped, &[("path", &it.path), ("why", &sk.text(lang))])).color(ORANGE));
+                }
+            }
+            for v in r.volumes.iter().chain(r.purge.iter().flat_map(|p| p.volumes.iter())) {
+                if let (Some(b), Some(a)) = (v.free_before, v.free_after) {
+                    ui.label(lang.fmt(
+                        Msg::AppFreeSpace,
+                        &[("volume", &v.volume), ("before", &fmt::bytes(b)), ("after", &fmt::bytes(a))],
+                    ));
+                }
+            }
+            ui.separator();
+        }
+        if !busy && ui.button(lang.t(Msg::AppDraftPlan)).clicked() {
+            core.start_draft();
+        }
+        match draft {
+            None => {
+                ui.label(lang.t(Msg::AppPlanNone));
+            }
+            Some(Err(e)) => {
+                ui.label(RichText::new(e).color(RED));
+            }
+            Some(Ok(d)) => {
+                if d.plan.items.is_empty() {
+                    ui.label(lang.t(Msg::CliPlanEmpty));
+                } else {
+                    plan_items(ui, lang, &d.plan);
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(!busy, egui::Button::new(lang.t(Msg::AppApplyPlan))).clicked() {
+                            core.start_human_apply(false);
+                        }
+                        if ui.add_enabled(!busy, egui::Button::new(lang.t(Msg::AppApplyPurgeNow))).clicked() {
+                            core.start_human_apply(true);
+                        }
+                    });
+                }
+                if !d.not_included.is_empty() {
+                    ui.separator();
+                    ui.label(RichText::new(lang.t(Msg::CliPlanNotIncluded)).strong());
+                    for n in d.not_included.iter().take(50) {
+                        let why: Vec<String> = n.why_not.iter().map(|w| w.text(lang)).collect();
+                        ui.label(RichText::new(format!("{}  —  {}", n.path, why.join("; "))).weak());
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// "Quarantine": what is held, with restore and purge.
+fn quarantine_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
+    let (items, last, busy) = {
+        let s = core.shared.lock().unwrap();
+        (s.quarantine.clone().unwrap_or_default(), s.last_change.clone(), s.busy)
+    };
+    let held: u64 = items.iter().map(|e| e.bytes_on_disk).sum();
+    ui.label(
+        RichText::new(if items.is_empty() {
+            lang.t(Msg::CliQuarantineEmpty).to_string()
+        } else {
+            lang.fmt(Msg::CliQuarantineHeld, &[("size", &fmt::bytes(held)), ("n", &items.len().to_string())])
+        })
+        .strong(),
+    );
+    if let Some(t) = last {
+        ui.label(t);
+    }
+    ui.horizontal(|ui| {
+        if ui.add_enabled(!busy && !items.is_empty(), egui::Button::new(lang.t(Msg::AppPurgeOld))).clicked() {
+            core.start_quarantine_change(None, false);
+        }
+        if ui.add_enabled(!busy && !items.is_empty(), egui::Button::new(lang.t(Msg::AppPurgeNow))).clicked() {
+            core.start_quarantine_change(None, true);
+        }
+        if busy {
+            ui.spinner();
+        }
+    });
+    ui.separator();
+    let now = wdc_core::time::now_unix_ms() / 1000;
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        for e in items.iter() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(&e.id).monospace().weak());
+                ui.label(format!("{:>10}", fmt::bytes(e.bytes_on_disk)));
+                ui.label(RichText::new(&e.original).monospace());
+                if ui.add_enabled(!busy, egui::Button::new(lang.t(Msg::AppRestore))).clicked() {
+                    core.start_quarantine_change(Some(e.id.clone()), false);
+                }
+            });
+            let title = rule_of(&e.rule_id).map(|r| r.title(lang).to_string()).unwrap_or_else(|| e.rule_id.clone());
+            let days = now.saturating_sub(e.moved_at) / 86_400;
+            ui.label(RichText::new(lang.fmt(Msg::CliQuarantineLine, &[("rule", &title), ("days", &days.to_string()), ("stored", &e.stored)])).weak());
         }
     });
 }
