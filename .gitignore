@@ -12,3 +12,7 @@
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Workflow files of a slice in flight (AGENTS.md section 2)
+/TASK-*.md
+/AUDIT-*.md
