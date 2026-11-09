@@ -182,7 +182,8 @@ fn a_junction_planned_or_swapped_in_moves_nothing() {
     junction(&cache, &target);
     let r = apply_plan(&d.plan, &c, &data, true);
     assert_eq!(r.moved, 0, "{:#?}", r.items);
-    assert!(matches!(r.items[0].skipped, Some(Skip::IsLink)), "{:#?}", r.items);
+    // Its file ID differs from the plan's too, but it is refused first because it is a link.
+    guard_assert!("apply-link", matches!(r.items[0].skipped, Some(Skip::IsLink)), "refused as a link: {:#?}", r.items);
 
     // Planned as the junction itself, with its own file ID (a hand-written plan).
     let r = apply_plan(&crafted(&cache, "vscode-caches"), &c, &data, true);
