@@ -209,7 +209,7 @@ fn apply_restore_and_purge_without_presence_proof_refuse() {
         Duration::from_secs(120),
     );
     println!("ConPTY output:\n{}", c.output);
-    assert!(c.output.contains("Type it and press Enter"), "the console asked for the code");
+    assert!(c.output.contains("Type it and press Enter"), "the console asked for the code (exit {:?})", c.exit_code);
     assert_eq!(c.exit_code, Some(4), "refused in a pseudo-console");
     assert_eq!(tree(&cache), before, "nothing moved");
     assert_eq!(user.json(&["quarantine", "--json"])["held_bytes"], 0);

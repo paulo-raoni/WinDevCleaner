@@ -241,6 +241,9 @@ pub fn run_in_pseudo_console(
     }
     let mut si: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
     si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+    // Null standard handles: otherwise the child uses the test runner's redirected ones
+    // instead of the pseudo-console.
+    si.StartupInfo.dwFlags = windows_sys::Win32::System::Threading::STARTF_USESTDHANDLES;
     si.lpAttributeList = list;
     let mut cmdline: Vec<u16> = {
         let mut s = format!("\"{}\"", exe.display());
