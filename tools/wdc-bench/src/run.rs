@@ -137,8 +137,17 @@ fn compare(totals: &Value, e: &Expected) -> Vec<String> {
 }
 
 fn scan_once(args: &Args, root: &Path, data: &Path, kind: &'static str, e: &Expected) -> Run {
+    scan_once_jobs(args, root, data, kind, e, 1)
+}
+
+/// One scan by the real `wdc.exe`, with `--jobs` workers, checked against the fixture's totals.
+fn scan_once_jobs(args: &Args, root: &Path, data: &Path, kind: &'static str, e: &Expected, jobs: usize) -> Run {
     let mut cmd = Command::new(&args.wdc);
-    cmd.arg("scan").arg(root).args(["--json", "--top", "50"]).env("WDC_DATA_DIR", data);
+    cmd.arg("scan")
+        .arg(root)
+        .args(["--json", "--top", "50", "--jobs"])
+        .arg(jobs.to_string())
+        .env("WDC_DATA_DIR", data);
     let m = measure(&mut cmd);
     let v: Value = serde_json::from_str(&m.stdout).unwrap_or(Value::Null);
     let totals = v["totals"].clone();
@@ -262,7 +271,6 @@ struct ParallelWalk {
     errors: u64,
     totals_equal: bool,
     logical_processors: usize,
-    verdict: String,
 }
 
 /// 3 cold runs with 1 worker and 3 with 4, interleaved, each after a detach and re-attach.
@@ -317,12 +325,52 @@ fn parallel_walk(args: &Args, root: &Path, hold: &dyn Fn() -> Box<dyn std::any::
     p.median_ms_1_worker = median(p.times_ms_1_worker.clone());
     p.median_ms_4_workers = median(p.times_ms_4_workers.clone());
     p.ratio = p.median_ms_1_worker / p.median_ms_4_workers;
-    p.verdict = if p.ratio > 2.0 {
-        "ratio > 2.0: slice 6 is worth building".into()
-    } else {
-        "ratio <= 2.0: slice 6 is dropped".into()
-    };
     p
+}
+
+/// Cold scans by the real `wdc.exe`: `--jobs 1` and `--jobs 4`, interleaved (plan 6.3). The
+/// decision to ship `--jobs` is made (owner, 2026-11-11); this reports what it gives.
+#[derive(Serialize, Default)]
+struct JobsCold {
+    /// Why nothing (or not everything) was measured, if so.
+    error: Option<String>,
+    /// Workers of each run, in the order they ran.
+    order: Vec<usize>,
+    times_ms_1: Vec<f64>,
+    times_ms_4: Vec<f64>,
+    median_ms_1: f64,
+    median_ms_4: f64,
+    ratio: f64,
+    /// Peak private bytes of the `--jobs 4` runs, for information (the 40 MiB budget is of `--jobs 1`).
+    peak_private_bytes_4: u64,
+    /// Every run, with its totals and whether they equal the fixture's.
+    runs: Vec<Run>,
+}
+
+/// 3 cold runs with `--jobs 1` and 3 with `--jobs 4`, interleaved, each after a detach and re-attach.
+fn jobs_cold(args: &Args, root: &Path, data: &Path, e: &Expected, hold: &dyn Fn() -> Box<dyn std::any::Any>) -> JobsCold {
+    let mut j = JobsCold::default();
+    for jobs in [1usize, 4, 1, 4, 1, 4] {
+        if let Err(err) = cold_cycle(&args.vhd, args.letter) {
+            j.error = Some(format!("cold cycle failed: {err}"));
+            break;
+        }
+        let _held = hold();
+        let run = scan_once_jobs(args, root, data, if jobs == 1 { "cold-jobs-1" } else { "cold-jobs-4" }, e, jobs);
+        j.order.push(jobs);
+        let ms = run.measurement.wall_ms;
+        if jobs == 1 {
+            j.times_ms_1.push(ms);
+        } else {
+            j.times_ms_4.push(ms);
+            j.peak_private_bytes_4 = j.peak_private_bytes_4.max(run.measurement.peak_private_bytes);
+        }
+        j.runs.push(run);
+    }
+    j.median_ms_1 = median(j.times_ms_1.clone());
+    j.median_ms_4 = median(j.times_ms_4.clone());
+    j.ratio = j.median_ms_1 / j.median_ms_4;
+    j
 }
 
 #[derive(Serialize)]
@@ -387,6 +435,11 @@ pub fn main() -> i32 {
         parallel_walk(&args, &root, &|| Box::new(hold(cloud_ok)))
     } else {
         ParallelWalk { error: Some("not measured: the cold cycle failed above".into()), ..Default::default() }
+    };
+    let jobs_cold = if cold_error.is_none() {
+        jobs_cold(&args, &root, &data, &fixture.expected, &|| Box::new(hold(cloud_ok)))
+    } else {
+        JobsCold { error: Some("not measured: the cold cycle failed above".into()), ..Default::default() }
     };
     let fetches = crate::cloud::FETCH_DATA_CALLS.load(std::sync::atomic::Ordering::SeqCst);
 
@@ -494,6 +547,22 @@ pub fn main() -> i32 {
             false,
         );
     }
+    // `wdc scan --jobs 4` must count what `--jobs 1` counts: the fixture's expected totals, in every run.
+    let jobs4: Vec<&Run> = jobs_cold.runs.iter().filter(|r| r.kind == "cold-jobs-4").collect();
+    let jobs4_ok = jobs_cold.error.is_none() && jobs4.len() == 3 && jobs4.iter().all(|r| r.matches_expected);
+    check(
+        &mut checks,
+        "`wdc scan --jobs 4` (3 cold runs) equals the generator's expected values",
+        serde_json::to_string(&fixture.expected).unwrap(),
+        if jobs4_ok {
+            "all runs equal".into()
+        } else if let Some(e) = &jobs_cold.error {
+            format!("not measured: {e}")
+        } else {
+            jobs4.iter().flat_map(|r| r.mismatches.clone()).collect::<Vec<_>>().join("; ")
+        },
+        jobs4_ok,
+    );
     let pass = checks.iter().all(|c| c.pass);
 
     let report = json!({
@@ -508,8 +577,9 @@ pub fn main() -> i32 {
         "build_seconds": args.build_seconds,
         "app": app,
         "parallel_walk": parallel,
+        "scan_jobs_cold": jobs_cold,
         "not_measured": [
-            "--jobs 1, 2 and 4: the option does not exist in slice 1 (plan 6.3: it ships in slice 6 only if a cold-cache gain above 2x is measured); every run is --jobs 1",
+            "--jobs 2 (only 1 and 4 are measured)",
             "behaviour without admin rights: the runner is elevated (plan 6.4)"
         ],
     });
@@ -565,7 +635,7 @@ pub fn main() -> i32 {
                  | Workers | Run times (ms, in order) | Median (ms) |\n|---|---|---|\n| 1 | {} | {:.0} |\n| 4 | {} | {:.0} |\n\n\
                  All six times in run order (ms): {}.\n\nRatio median(1) / median(4): {:.2}.\n\n\
                  Totals (equal in every run): {} files, {} folders, {} bytes on disk ({} folders not listable).\n\n\
-                 Logical processors of the runner: {}.\n\n{}\n",
+                 Logical processors of the runner: {}.\n",
                 fmt(&parallel.times_ms_1_worker),
                 parallel.median_ms_1_worker,
                 fmt(&parallel.times_ms_4_workers),
@@ -576,12 +646,36 @@ pub fn main() -> i32 {
                 parallel.dirs,
                 parallel.bytes,
                 parallel.errors,
-                parallel.logical_processors,
-                parallel.verdict
+                parallel.logical_processors
             ));
         }
     }
-    md.push_str("\nNot measured: `--jobs` 2 and 4 (no such option in slice 1; plan 6.3 defers it to slice 6); behaviour without admin (the runner is elevated).\n");
+    md.push_str("\n### The real `wdc.exe scan --jobs 1` and `--jobs 4`, cold\n\n");
+    match &jobs_cold.error {
+        Some(e) if jobs_cold.runs.is_empty() => md.push_str(&format!("Not measured: {e}\n")),
+        _ => {
+            let fmt = |v: &[f64]| v.iter().map(|t| format!("{t:.0}")).collect::<Vec<_>>().join(", ");
+            md.push_str(&format!(
+                "The whole scan (every per-file step), run by the product's own executable on the fixture, interleaved 1, 4, 1, 4, 1, 4 jobs, \
+                 each after the VHDX was detached and re-attached.\n\n\
+                 | Jobs | Run times (ms, in order) | Median (ms) |\n|---|---|---|\n| 1 | {} | {:.0} |\n| 4 | {} | {:.0} |\n\n\
+                 Ratio median(1) / median(4): {:.2}. Peak private memory of the `--jobs 4` runs: {:.1} MiB (the budget of {} MiB is of `--jobs 1`).\n\n\
+                 Totals of the `--jobs 4` runs equal the fixture's expected totals: {}.\n",
+                fmt(&jobs_cold.times_ms_1),
+                jobs_cold.median_ms_1,
+                fmt(&jobs_cold.times_ms_4),
+                jobs_cold.median_ms_4,
+                jobs_cold.ratio,
+                jobs_cold.peak_private_bytes_4 as f64 / MIB as f64,
+                PRIVATE_BYTES / MIB,
+                if jobs4_ok { "yes" } else { "NO" }
+            ));
+            if let Some(e) = &jobs_cold.error {
+                md.push_str(&format!("\nIncomplete: {e}\n"));
+            }
+        }
+    }
+    md.push_str("\nNot measured: `--jobs 2`; behaviour without admin (the runner is elevated).\n");
     std::fs::write(args.out.join("budget.md"), &md).unwrap();
     println!("{md}");
 
