@@ -84,6 +84,29 @@ is present.
 The old Python tool is kept in `legacy/` as `.txt` files, for reference only, and will be
 deleted at the end of the rebuild.
 
+## Programs: `wdc programs`
+
+`wdc programs` (and `--json`, the MCP `programs` tool and the app's Programs view) is the read-only
+replacement of the old Obliterate mode. It lists the installed programs found in the uninstall
+registry keys (per user, and per machine in the 64-bit and 32-bit views) with name, version,
+publisher, install date and the program's own uninstall command, for you to run yourself.
+
+- The size is the figure the installer reports (`EstimatedSize`), not a measured size: some
+  installers report nothing, and the tool does not walk install folders in this version. Programs
+  are ordered by that figure, largest first.
+- The tool never uninstalls. It runs no command, writes nothing to the registry and moves no file;
+  the registry is opened for reading only. Updates, hotfixes and system components are not listed.
+- Leftovers: each run saves the list in `programs.json` in the data folder. On the next run, for
+  each program that is gone, it reports a folder that is a direct child of `%APPDATA%`,
+  `%LOCALAPPDATA%` or `%LOCALAPPDATA%\Programs` and is named exactly like the program or its
+  publisher (ignoring case, nothing else: `Foo` never matches `Foo Bar`, `FooBar` or `Foo 2`). A
+  publisher folder is reported only when no installed program has that publisher. These are
+  `install-leftover` candidates: report-only, never in a plan, and a person must confirm each one
+  (`wdc explain FOLDER` says what it is).
+- No winget id is shown: matching a program to a winget id exactly needs winget's own correlation,
+  and a guessed id would break the rule that nothing matches by substring. Store (MSIX) apps are
+  not in these registry keys and are not listed.
+
 ## Install
 
 Download `WinDevCleaner.msi` from the latest successful
