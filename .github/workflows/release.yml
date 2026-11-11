@@ -65,8 +65,9 @@ jobs:
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
           New-Item -ItemType Directory -Force dist | Out-Null
-          wix build installer\WinDevCleaner.wxs -arch x64 -d Version=$env:WDC_MSI_VERSION -d BinDir=target\release -o "dist\WinDevCleaner-$env:WDC_VERSION-x64.msi"
+          wix build installer\WinDevCleaner.wxs -arch x64 -ext WixToolset.UI.wixext -pdbtype none -d Version=$env:WDC_MSI_VERSION -d BinDir=target\release -o "dist\WinDevCleaner-$env:WDC_VERSION-x64.msi"
       - name: Install, run and uninstall the MSI
         shell: pwsh
         run: ci\msi-check.ps1 -Msi "dist\WinDevCleaner-$env:WDC_VERSION-x64.msi" -Version $env:WDC_VERSION
