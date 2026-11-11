@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use wdc_testkit::{measure, Measurement};
 
 use crate::fixture::{self, Expected, Fixture};
+use crate::parallel;
 
 const MIB: u64 = 1024 * 1024;
 
@@ -241,6 +242,89 @@ fn app_budget(args: &Args, root: &Path) -> AppBudget {
     b
 }
 
+/// Result of the parallel-walk measurement (plan 6.3). Informational: only a totals mismatch
+/// fails the bench.
+#[derive(Serialize, Default)]
+struct ParallelWalk {
+    /// Why nothing was measured, if so.
+    error: Option<String>,
+    /// Wall ms of each cold run, in the order they ran (1, 4, 1, 4, 1, 4 workers).
+    order: Vec<usize>,
+    times_ms_all: Vec<f64>,
+    times_ms_1_worker: Vec<f64>,
+    times_ms_4_workers: Vec<f64>,
+    median_ms_1_worker: f64,
+    median_ms_4_workers: f64,
+    ratio: f64,
+    files: u64,
+    dirs: u64,
+    bytes: u64,
+    errors: u64,
+    totals_equal: bool,
+    logical_processors: usize,
+    verdict: String,
+}
+
+/// 3 cold runs with 1 worker and 3 with 4, interleaved, each after a detach and re-attach.
+fn parallel_walk(args: &Args, root: &Path, hold: &dyn Fn() -> Box<dyn std::any::Any>) -> ParallelWalk {
+    let mut p = ParallelWalk {
+        logical_processors: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
+        ..Default::default()
+    };
+    let mut first: Option<parallel::Totals> = None;
+    for workers in [1usize, 4, 1, 4, 1, 4] {
+        if let Err(e) = cold_cycle(&args.vhd, args.letter) {
+            p.error = Some(format!("cold cycle failed: {e}"));
+            return p;
+        }
+        let _held = hold();
+        let r = match parallel::walk(root, workers) {
+            Ok(r) => r,
+            Err(e) => {
+                p.error = Some(format!("walk with {workers} workers failed: {e}"));
+                return p;
+            }
+        };
+        let ms = r.elapsed.as_secs_f64() * 1000.0;
+        p.order.push(workers);
+        p.times_ms_all.push(ms);
+        if workers == 1 {
+            p.times_ms_1_worker.push(ms);
+        } else {
+            p.times_ms_4_workers.push(ms);
+        }
+        match &first {
+            None => {
+                first = Some(r.totals);
+                p.files = r.totals.files;
+                p.dirs = r.totals.dirs;
+                p.bytes = r.totals.bytes;
+                p.errors = r.totals.errors;
+                p.totals_equal = true;
+            }
+            Some(f) => {
+                if !f.same_counts(&r.totals) {
+                    p.totals_equal = false;
+                    p.error = Some(format!(
+                        "totals differ: first run {f:?}, run with {workers} workers {:?}",
+                        r.totals
+                    ));
+                    return p;
+                }
+            }
+        }
+    }
+    p.median_ms_1_worker = median(p.times_ms_1_worker.clone());
+    p.median_ms_4_workers = median(p.times_ms_4_workers.clone());
+    p.ratio = p.median_ms_1_worker / p.median_ms_4_workers;
+    p.verdict = if p.ratio > 2.0 {
+        "ratio > 2.0: slice 6 is worth building".into()
+    } else {
+        "ratio <= 2.0: slice 6 is dropped".into()
+    };
+    p
+}
+
 #[derive(Serialize)]
 struct Check {
     name: String,
@@ -299,6 +383,11 @@ pub fn main() -> i32 {
         let _held = hold(cloud_ok);
         runs.push(scan_once(&args, &root, &data, "cold", &fixture.expected));
     }
+    let parallel = if cold_error.is_none() {
+        parallel_walk(&args, &root, &|| Box::new(hold(cloud_ok)))
+    } else {
+        ParallelWalk { error: Some("not measured: the cold cycle failed above".into()), ..Default::default() }
+    };
     let fetches = crate::cloud::FETCH_DATA_CALLS.load(std::sync::atomic::Ordering::SeqCst);
 
     // Start-up: `wdc --version`, 21 runs.
@@ -392,6 +481,19 @@ pub fn main() -> i32 {
     } else {
         check(&mut checks, "app started", "yes".into(), app.error.clone().unwrap_or_default(), false);
     }
+    // The parallel walk is informational: only totals that differ between runs fail the bench
+    // (a faster walk that counts differently proves nothing). A walk that could not run for
+    // another reason (a failed cold cycle) is reported in its section and in the cold check above.
+    let parallel_mismatch = parallel.error.is_some() && !parallel.totals_equal && !parallel.order.is_empty();
+    if parallel_mismatch {
+        check(
+            &mut checks,
+            "parallel walk: totals equal in every run (files, directories, bytes)",
+            "equal".into(),
+            parallel.error.clone().unwrap_or_default(),
+            false,
+        );
+    }
     let pass = checks.iter().all(|c| c.pass);
 
     let report = json!({
@@ -405,6 +507,7 @@ pub fn main() -> i32 {
         "app_exe_bytes": app_size,
         "build_seconds": args.build_seconds,
         "app": app,
+        "parallel_walk": parallel,
         "not_measured": [
             "--jobs 1, 2 and 4: the option does not exist in slice 1 (plan 6.3: it ships in slice 6 only if a cold-cache gain above 2x is measured); every run is --jobs 1",
             "behaviour without admin rights: the runner is elevated (plan 6.4)"
@@ -452,6 +555,32 @@ pub fn main() -> i32 {
         app_size as f64 / MIB as f64,
         args.build_seconds.map(|s| format!("{s:.0} s")).unwrap_or_else(|| "not given".into())
     ));
+    md.push_str("\n## Parallel walk (plan 6.3)\n\n");
+    match &parallel.error {
+        Some(e) if parallel.median_ms_1_worker == 0.0 => md.push_str(&format!("Not measured: {e}\n")),
+        _ => {
+            let fmt = |v: &[f64]| v.iter().map(|t| format!("{t:.0}")).collect::<Vec<_>>().join(", ");
+            md.push_str(&format!(
+                "Cold runs (VHDX detached and re-attached before each), interleaved 1, 4, 1, 4, 1, 4 workers; same calls as the scanner, none of its per-file work.\n\n\
+                 | Workers | Run times (ms, in order) | Median (ms) |\n|---|---|---|\n| 1 | {} | {:.0} |\n| 4 | {} | {:.0} |\n\n\
+                 All six times in run order (ms): {}.\n\nRatio median(1) / median(4): {:.2}.\n\n\
+                 Totals (equal in every run): {} files, {} folders, {} bytes on disk ({} folders not listable).\n\n\
+                 Logical processors of the runner: {}.\n\n{}\n",
+                fmt(&parallel.times_ms_1_worker),
+                parallel.median_ms_1_worker,
+                fmt(&parallel.times_ms_4_workers),
+                parallel.median_ms_4_workers,
+                fmt(&parallel.times_ms_all),
+                parallel.ratio,
+                parallel.files,
+                parallel.dirs,
+                parallel.bytes,
+                parallel.errors,
+                parallel.logical_processors,
+                parallel.verdict
+            ));
+        }
+    }
     md.push_str("\nNot measured: `--jobs` 2 and 4 (no such option in slice 1; plan 6.3 defers it to slice 6); behaviour without admin (the runner is elevated).\n");
     std::fs::write(args.out.join("budget.md"), &md).unwrap();
     println!("{md}");
