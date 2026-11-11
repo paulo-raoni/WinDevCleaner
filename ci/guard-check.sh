@@ -21,6 +21,8 @@ mkdir -p "$(dirname "$REPORT")" "$LOGS"
 CASES=(
   "hardlink-dedup|wdc-core|fixtures|hard_link_with_both_names_inside_the_root_counts_once"
   "hardlink-dedup|wdc-core|fixtures|hard_link_with_a_name_outside_the_root_counts_once_and_reports_both_names"
+  "hardlink-dedup|wdc-core|fixtures|hard_link_names_in_sibling_folders_count_once_with_4_jobs"
+  "hardlink-dedup|wdc-core|fixtures|hard_link_with_a_name_outside_the_root_counts_once_with_4_jobs"
   "large-file-recheck|wdc-core|fixtures|hard_link_with_a_name_outside_the_root_counts_once_and_reports_both_names"
   "large-file-recheck|wdc-core|fixtures|stale_size_in_another_names_directory_entry_is_corrected"
   "no-follow-links|wdc-core|fixtures|junctions_and_symbolic_links_are_recorded_and_never_followed"

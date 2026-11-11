@@ -1,12 +1,16 @@
 //! The read-only scanner (plan, section 4.1).
 //!
-//! It walks each root one directory at a time, single-threaded, and keeps only per-directory
-//! totals, the top-N largest files and the set of large-file IDs (memory is bounded by the
-//! number of directories, not files). Sizes are sizes on disk; a file with several names is
-//! counted once; links are recorded and never followed; cloud placeholders count 0 and are
-//! never read.
+//! It walks each root one directory at a time, on one thread by default, and keeps only
+//! per-directory totals, the top-N largest files and the set of large-file IDs (memory is
+//! bounded by the number of directories, not files). Sizes are sizes on disk; a file with
+//! several names is counted once; links are recorded and never followed; cloud placeholders
+//! count 0 and are never read.
+//!
+//! With `jobs` above 1 (at most 4) the directories of a root are listed by that many worker
+//! threads and the results are merged in the order one thread would have produced, so the
+//! report is the same (see `parallel`).
 
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,10 +18,14 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-#[cfg(windows)]
-mod windows;
+mod parallel;
 #[cfg(not(windows))]
 mod portable;
+#[cfg(windows)]
+mod windows;
+
+/// The most workers a scan may use.
+pub const MAX_JOBS: usize = 4;
 
 /// Files at or above this size on disk are remembered by file ID, so a second name of the
 /// same file counts 0 bytes. Smaller files are not tracked, which bounds memory.
@@ -42,17 +50,28 @@ pub struct ScanOptions {
     pub top_files: usize,
     /// Also list every file of at least 1 MB (for `explain`, on one item's small tree).
     pub collect_large: bool,
+    /// Worker threads (`--jobs`): 1 (the default) walks on the calling thread; up to
+    /// [`MAX_JOBS`] list directories in parallel, each worker in background mode. The report
+    /// is the same either way, timing aside.
+    pub jobs: usize,
 }
 
 impl Default for ScanOptions {
     fn default() -> Self {
-        ScanOptions { roots: Vec::new(), excluded: Vec::new(), throttle: None, top_files: 50, collect_large: false }
+        ScanOptions {
+            roots: Vec::new(),
+            excluded: Vec::new(),
+            throttle: None,
+            top_files: 50,
+            collect_large: false,
+            jobs: 1,
+        }
     }
 }
 
 /// One directory and its totals. Directories form a tree through `parent` indexes; a child
 /// always has a larger index than its parent.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct DirNode {
     /// The folder name; for a root, its full path.
     pub name: String,
@@ -102,7 +121,7 @@ pub enum LinkKind {
 }
 
 /// A link inside the scanned tree. It is recorded and never followed.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct LinkEntry {
     pub path: String,
     pub kind: LinkKind,
@@ -110,7 +129,7 @@ pub struct LinkEntry {
 }
 
 /// Something that could not be read. The scan goes on.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct ScanError {
     pub path: String,
     /// Windows error code (or OS error number elsewhere).
@@ -142,7 +161,7 @@ pub struct Totals {
 }
 
 /// One scanned root.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct RootReport {
     pub path: String,
     /// Index of the root's node in [`ScanReport::dirs`], when it could be opened.
@@ -182,6 +201,62 @@ pub struct ScanReport {
     pub large_files: Vec<TopFile>,
 }
 
+/// The N largest files seen. The order is total (size on disk, then path), so the result does
+/// not depend on the order files are offered in: workers can each keep their own and merge.
+pub(crate) struct TopN {
+    heap: BinaryHeap<Reverse<TopFile>>,
+    n: usize,
+}
+
+impl TopN {
+    pub fn new(n: usize) -> TopN {
+        TopN { heap: BinaryHeap::new(), n }
+    }
+
+    /// Whether a file of this size could enter the list (the path is built only then).
+    pub fn wants(&self, bytes_on_disk: u64) -> bool {
+        if self.n == 0 {
+            return false;
+        }
+        if self.heap.len() < self.n {
+            return true;
+        }
+        // Equal sizes are decided by path in `add`.
+        self.heap.peek().map(|Reverse(min)| bytes_on_disk >= min.bytes_on_disk).unwrap_or(true)
+    }
+
+    pub fn add(&mut self, f: TopFile) {
+        self.heap.push(Reverse(f));
+        if self.heap.len() > self.n {
+            self.heap.pop();
+        }
+    }
+
+    pub fn into_vec(self) -> Vec<TopFile> {
+        self.heap.into_iter().map(|Reverse(f)| f).collect()
+    }
+
+    fn into_sorted(self) -> Vec<TopFile> {
+        let mut v = self.into_vec();
+        v.sort_by(|a, b| b.cmp(a));
+        v
+    }
+}
+
+/// Where a walker reports what one directory holds. The one-thread walk applies it to the
+/// collector at once; a parallel worker records it per directory, to be merged in order.
+pub(crate) trait Sink {
+    fn link(&mut self, path: String, kind: LinkKind, directory: bool);
+    fn error(&mut self, path: String, code: u32);
+    fn excluded(&mut self, path: String);
+    /// A cloud placeholder or offline file, counted 0 and never read.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn placeholder(&mut self);
+    /// A file measured. `key` identifies it for the hard-link count (volume, file ID); `path`
+    /// is built only when the sink needs it.
+    fn file(&mut self, key: (u64, u128), on_disk: u64, logical: u64, links: u32, path: impl FnOnce() -> String);
+}
+
 /// Records kept while walking; shared by the platform walkers.
 pub(crate) struct Collector<'a> {
     pub dirs: Vec<DirNode>,
@@ -189,21 +264,91 @@ pub(crate) struct Collector<'a> {
     pub errors: Vec<ScanError>,
     pub excluded_paths: Vec<String>,
     pub totals: Totals,
-    top: BinaryHeap<Reverse<TopFile>>,
-    top_n: usize,
+    top: TopN,
     pub collect_large: bool,
     pub large: Vec<TopFile>,
+    /// Large files already counted, by (volume serial, file ID), across every root of the
+    /// scan: a file with one name in each of two roots is still counted once.
+    seen: HashSet<(u64, u128)>,
     progress: Option<&'a mut dyn FnMut(&Progress)>,
     last_progress: Instant,
+    /// The last progress reported, so the numbers never go back.
+    reported: Progress,
     pub cancel: Option<&'a AtomicBool>,
     pub throttle: Option<Duration>,
+    pub jobs: usize,
+}
+
+/// The one-thread sink: everything goes straight into the collector, for one directory.
+pub(crate) struct SerialSink<'c, 'a> {
+    pub c: &'c mut Collector<'a>,
+    pub dir: u32,
+}
+
+impl Sink for SerialSink<'_, '_> {
+    fn link(&mut self, path: String, kind: LinkKind, directory: bool) {
+        self.c.add_link(path, kind, directory);
+    }
+
+    fn error(&mut self, path: String, code: u32) {
+        self.c.add_error(path, code);
+    }
+
+    fn excluded(&mut self, path: String) {
+        self.c.add_excluded(path);
+    }
+
+    fn placeholder(&mut self) {
+        self.c.totals.placeholders += 1;
+    }
+
+    fn file(&mut self, key: (u64, u128), on_disk: u64, logical: u64, links: u32, path: impl FnOnce() -> String) {
+        let c = &mut *self.c;
+        let mut path = Some(path);
+        let mut built = None;
+        if c.collect_large && on_disk >= DEDUP_THRESHOLD {
+            let p = path.take().map(|f| f()).unwrap_or_default();
+            c.large.push(TopFile { path: p.clone(), bytes_on_disk: on_disk, logical_bytes: logical, links });
+            built = Some(p);
+        }
+        let counted = c.count_once(key, on_disk);
+        c.add_file(self.dir, counted, logical);
+        if c.wants_top(counted) {
+            let p = built.or_else(|| path.take().map(|f| f())).unwrap_or_default();
+            c.add_top(TopFile { path: p, bytes_on_disk: counted, logical_bytes: logical, links });
+        }
+    }
 }
 
 /// Caps on recorded lists, so a pathological tree cannot grow the report without bound.
-const MAX_LINKS: usize = 10_000;
-const MAX_ERRORS: usize = 10_000;
+pub(crate) const MAX_LINKS: usize = 10_000;
+pub(crate) const MAX_ERRORS: usize = 10_000;
 
 impl<'a> Collector<'a> {
+    pub fn new(
+        options: &ScanOptions,
+        progress: Option<&'a mut dyn FnMut(&Progress)>,
+        cancel: Option<&'a AtomicBool>,
+    ) -> Collector<'a> {
+        Collector {
+            dirs: Vec::new(),
+            links: Vec::new(),
+            errors: Vec::new(),
+            excluded_paths: Vec::new(),
+            totals: Totals::default(),
+            top: TopN::new(options.top_files),
+            collect_large: options.collect_large,
+            large: Vec::new(),
+            seen: HashSet::new(),
+            progress,
+            last_progress: Instant::now(),
+            reported: Progress::default(),
+            cancel,
+            throttle: options.throttle,
+            jobs: options.jobs.clamp(1, MAX_JOBS),
+        }
+    }
+
     pub fn add_dir(&mut self, name: String, parent: u32) -> u32 {
         let depth = if parent == NO_PARENT { 0 } else { self.dirs[parent as usize].depth + 1 };
         let idx = self.dirs.len() as u32;
@@ -221,22 +366,27 @@ impl<'a> Collector<'a> {
         self.totals.logical_bytes += logical;
     }
 
+    /// One count per file: a second name of a remembered large file counts 0 bytes. Returns
+    /// the size on disk to count for this name.
+    #[allow(unused_mut)]
+    pub fn count_once(&mut self, key: (u64, u128), on_disk: u64) -> u64 {
+        let mut counted = on_disk;
+        // GUARD-BEGIN(hardlink-dedup)
+        if on_disk >= DEDUP_THRESHOLD && !self.seen.insert(key) {
+            self.totals.hardlink_duplicates += 1;
+            counted = 0;
+        }
+        // GUARD-END(hardlink-dedup)
+        counted
+    }
+
     /// Whether a file of this size would enter the top-N list (the path is built only then).
     pub fn wants_top(&self, bytes_on_disk: u64) -> bool {
-        if self.top_n == 0 {
-            return false;
-        }
-        if self.top.len() < self.top_n {
-            return true;
-        }
-        self.top.peek().map(|Reverse(min)| bytes_on_disk > min.bytes_on_disk).unwrap_or(true)
+        self.top.wants(bytes_on_disk)
     }
 
     pub fn add_top(&mut self, f: TopFile) {
-        self.top.push(Reverse(f));
-        if self.top.len() > self.top_n {
-            self.top.pop();
-        }
+        self.top.add(f);
     }
 
     pub fn add_link(&mut self, path: String, kind: LinkKind, directory: bool) {
@@ -280,6 +430,23 @@ impl<'a> Collector<'a> {
             }
         }
     }
+
+    pub fn wants_progress(&self) -> bool {
+        self.progress.is_some()
+    }
+
+    /// Progress of a parallel walk: what the workers counted so far on top of `base`, the
+    /// totals before this root. Each number is held at its highest so far.
+    pub fn report_progress(&mut self, p: Progress) {
+        let mut p = p;
+        p.dirs = p.dirs.max(self.reported.dirs);
+        p.files = p.files.max(self.reported.files);
+        p.bytes_on_disk = p.bytes_on_disk.max(self.reported.bytes_on_disk);
+        self.reported = p.clone();
+        if let Some(cb) = self.progress.as_mut() {
+            cb(&p);
+        }
+    }
 }
 
 fn error_kind(code: u32) -> &'static str {
@@ -311,21 +478,7 @@ pub fn scan<'a>(
 ) -> ScanReport {
     let started_unix_ms = crate::time::now_unix_ms();
     let started = Instant::now();
-    let mut c = Collector {
-        dirs: Vec::new(),
-        links: Vec::new(),
-        errors: Vec::new(),
-        excluded_paths: Vec::new(),
-        totals: Totals::default(),
-        top: BinaryHeap::new(),
-        top_n: options.top_files,
-        collect_large: options.collect_large,
-        large: Vec::new(),
-        progress,
-        last_progress: Instant::now(),
-        cancel,
-        throttle: options.throttle,
-    };
+    let mut c = Collector::new(options, progress, cancel);
     let mut roots = Vec::new();
     #[cfg(windows)]
     let mut walker = windows::Walker::new(&options.excluded);
@@ -362,8 +515,7 @@ pub fn scan<'a>(
         }
     }
 
-    let mut top: Vec<TopFile> = c.top.into_iter().map(|Reverse(f)| f).collect();
-    top.sort_by(|a, b| b.cmp(a));
+    let top = c.top.into_sorted();
     let cancelled = c.cancel.map(|f| f.load(Ordering::Relaxed)).unwrap_or(false);
     ScanReport {
         started_unix_ms,
@@ -534,21 +686,7 @@ mod tests {
     use super::*;
 
     fn tree() -> ScanReport {
-        let mut c = Collector {
-            dirs: Vec::new(),
-            links: Vec::new(),
-            errors: Vec::new(),
-            excluded_paths: Vec::new(),
-            totals: Totals::default(),
-            top: BinaryHeap::new(),
-            top_n: 2,
-            collect_large: false,
-            large: Vec::new(),
-            progress: None,
-            last_progress: Instant::now(),
-            cancel: None,
-            throttle: None,
-        };
+        let mut c = Collector::new(&ScanOptions { top_files: 2, ..Default::default() }, None, None);
         let r = c.add_dir(r"C:\root".into(), NO_PARENT);
         let a = c.add_dir("a".into(), r);
         let b = c.add_dir("b".into(), a);
@@ -572,8 +710,7 @@ mod tests {
                 dirs[p as usize].files += f;
             }
         }
-        let mut top: Vec<TopFile> = c.top.into_iter().map(|Reverse(f)| f).collect();
-        top.sort_by(|a, b| b.cmp(a));
+        let top = c.top.into_sorted();
         ScanReport {
             started_unix_ms: 0,
             duration_ms: 0,

@@ -3,20 +3,19 @@
 //! tested in the Linux cloud session. It follows the same rules with POSIX data: size on
 //! disk from allocated blocks, one count per (device, inode), symbolic links not followed.
 
-use std::collections::HashSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use super::{Collector, LinkKind, RootReport, TopFile, DEDUP_THRESHOLD, NO_PARENT};
+use super::parallel::{self, DirWalker};
+use super::{Collector, LinkKind, RootReport, SerialSink, Sink, NO_PARENT};
 
 pub(crate) struct Walker {
     excluded: Vec<PathBuf>,
-    seen: HashSet<(u64, u64)>,
 }
 
 impl Walker {
     pub fn new(excluded: &[PathBuf]) -> Walker {
-        Walker { excluded: excluded.to_vec(), seen: HashSet::new() }
+        Walker { excluded: excluded.to_vec() }
     }
 
     pub fn walk_root(&mut self, root: &Path, c: &mut Collector) -> RootReport {
@@ -38,66 +37,72 @@ impl Walker {
         }
         let root_idx = c.add_dir(display, NO_PARENT);
         report.node = Some(root_idx);
-        let seen = &mut self.seen;
-        let mut stack = vec![(root_idx, std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf()))];
+        let root_path = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
+        if c.jobs > 1 {
+            parallel::walk_tree(c, root_idx, root_path, self);
+            return report;
+        }
+        let mut stack = vec![(root_idx, root_path)];
         while let Some((dir, path)) = stack.pop() {
             if c.cancelled() {
                 break;
             }
             c.between_dirs(|| path.to_string_lossy().into_owned());
-            let rd = match std::fs::read_dir(&path) {
-                Ok(rd) => rd,
-                Err(e) => {
-                    c.add_error(path.to_string_lossy().into_owned(), e.raw_os_error().unwrap_or(0) as u32);
-                    continue;
-                }
-            };
-            let mut subdirs = Vec::new();
-            for entry in rd.flatten() {
-                let full = entry.path();
-                let Ok(md) = std::fs::symlink_metadata(&full) else { continue };
-                let ft = md.file_type();
-                if ft.is_symlink() {
-                    let is_dir = std::fs::metadata(&full).map(|m| m.is_dir()).unwrap_or(false);
-                    c.add_link(full.to_string_lossy().into_owned(), LinkKind::SymbolicLink, is_dir);
-                    continue;
-                }
-                if ft.is_dir() {
-                    if self.excluded.iter().any(|e| e == &full) {
-                        c.add_excluded(full.to_string_lossy().into_owned());
-                    } else {
-                        subdirs.push((entry.file_name().to_string_lossy().into_owned(), full));
-                    }
-                    continue;
-                }
-                let mut on_disk = md.blocks() * 512;
-                if c.collect_large && on_disk >= DEDUP_THRESHOLD {
-                    c.large.push(TopFile {
-                        path: full.to_string_lossy().into_owned(),
-                        bytes_on_disk: on_disk,
-                        logical_bytes: md.len(),
-                        links: md.nlink() as u32,
-                    });
-                }
-                if on_disk >= DEDUP_THRESHOLD && !seen.insert((md.dev(), md.ino())) {
-                    c.totals.hardlink_duplicates += 1;
-                    on_disk = 0;
-                }
-                c.add_file(dir, on_disk, md.len());
-                if c.wants_top(on_disk) {
-                    c.add_top(TopFile {
-                        path: full.to_string_lossy().into_owned(),
-                        bytes_on_disk: on_disk,
-                        logical_bytes: md.len(),
-                        links: md.nlink() as u32,
-                    });
-                }
-            }
+            let subdirs = self.list(&path, &mut SerialSink { c, dir });
             for (name, full) in subdirs.into_iter().rev() {
                 let idx = c.add_dir(name, dir);
                 stack.push((idx, full));
             }
         }
         report
+    }
+}
+
+impl DirWalker for Walker {
+    type Path = PathBuf;
+
+    fn fork(&self) -> Walker {
+        Walker { excluded: self.excluded.clone() }
+    }
+
+    fn display(path: &PathBuf) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    fn list<S: Sink>(&mut self, path: &PathBuf, sink: &mut S) -> Vec<(String, PathBuf)> {
+        let rd = match std::fs::read_dir(path) {
+            Ok(rd) => rd,
+            Err(e) => {
+                sink.error(path.to_string_lossy().into_owned(), e.raw_os_error().unwrap_or(0) as u32);
+                return Vec::new();
+            }
+        };
+        let mut subdirs = Vec::new();
+        for entry in rd.flatten() {
+            let full = entry.path();
+            let Ok(md) = std::fs::symlink_metadata(&full) else { continue };
+            let ft = md.file_type();
+            if ft.is_symlink() {
+                let is_dir = std::fs::metadata(&full).map(|m| m.is_dir()).unwrap_or(false);
+                sink.link(full.to_string_lossy().into_owned(), LinkKind::SymbolicLink, is_dir);
+                continue;
+            }
+            if ft.is_dir() {
+                if self.excluded.iter().any(|e| e == &full) {
+                    sink.excluded(full.to_string_lossy().into_owned());
+                } else {
+                    subdirs.push((entry.file_name().to_string_lossy().into_owned(), full));
+                }
+                continue;
+            }
+            sink.file(
+                (md.dev(), md.ino() as u128),
+                md.blocks() * 512,
+                md.len(),
+                md.nlink() as u32,
+                || full.to_string_lossy().into_owned(),
+            );
+        }
+        subdirs
     }
 }
