@@ -127,8 +127,8 @@ command, for you to run yourself.
 
 ## What it can clean, and what it never touches
 
-**Cleaned by `apply` (12 rules).** Nothing else is cleaned. Where a rule names a program (the
-editors, Steam), the item is moved only while that program is closed.
+**Cleaned by `apply` (17 rules).** Nothing else is cleaned. Where a rule names a program (the
+editors, Steam, Edge, pip, uv), the item is moved only while that program is closed.
 
 - Obsolete extensions that VS Code, VS Code Insiders and Cursor listed for removal and no longer
   reference (3 rules).
@@ -140,6 +140,17 @@ editors, Steam), the item is moved only while that program is closed.
 - NVIDIA shader caches (`DXCache`, `GLCache`, `ComputeCache`). While a game or GPU app holds a file
   in one, that folder is left in place: close the program and run again.
 - Steam's web cache (`htmlcache`).
+- Microsoft Edge's page, script and GPU caches (`Cache`, `Code Cache`, `GPUCache`) in each profile.
+  The rest of a profile (history, passwords, cookies) is never touched.
+- pip's download and wheel cache, including the one of a Microsoft Store Python.
+- uv's package cache.
+- The browsers Playwright downloaded (one item per build; `npx playwright install` downloads them
+  again).
+- Temporary files and folders directly under `%TEMP%` that have not changed for 7 days. A file in
+  use keeps its item in place.
+
+The old tool's crash dumps (`CrashDumps`, Camtasia's `CrashDumps`) are not carried over: they are
+diagnostic data, not caches that regenerate, so they stay unknown or report-only.
 
 **NVIDIA app update artifacts** (`ota-artifacts`, under `ProgramData`) are never deleted by the
 tool, because that needs administrator rights. `wdc explain` on one gives the exact manual steps
@@ -219,7 +230,7 @@ the rewrite is section 2 of [the rebuild plan](docs/rebuild-plan.md).
 
 | Old mode | What replaced it |
 |---|---|
-| Cleaner, **SAFE** (the standard clean) | The rules with `wdc plan` / `wdc apply`: evidence per item, quarantine, restore, free space measured. The old list was fixed paths of one machine from 2025 (Edge, pip, uv and Playwright caches, crash dumps); the rules in this version cover the editors, NVIDIA shader caches and Steam, and crash dumps are a report-only system item. |
+| Cleaner, **SAFE** (the standard clean) | The rules with `wdc plan` / `wdc apply`: evidence per item, quarantine, restore, free space measured. The old list was fixed paths of one machine from 2025 (Edge, pip, uv and Playwright caches, crash dumps); the rules in this version cover the editors, NVIDIA shader caches, Steam, Edge, pip, uv, Playwright and old temporary files, and crash dumps are not cleaned (a report-only system item). |
 | Insanity mode (program folders ranked by size) | `wdc programs`, read-only. |
 | Obliterate, the uninstall step | `wdc programs` shows each program's own uninstall command for you to run. |
 
