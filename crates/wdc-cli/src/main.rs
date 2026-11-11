@@ -87,12 +87,25 @@ fn scan_command(args: &[String], lang: Lang) -> ExitCode {
     let mut throttle = None;
     let mut top = None;
     let mut depth = 2u16;
+    let mut jobs = 1usize;
     let mut roots: Vec<PathBuf> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         let a = args[i].as_str();
         match a {
             "--json" => json = true,
+            "--jobs" => {
+                let value = args.get(i + 1);
+                match value.and_then(|v| v.parse::<usize>().ok()).filter(|n| (1..=wdc_core::scan::MAX_JOBS).contains(n)) {
+                    Some(n) => jobs = n,
+                    None => {
+                        let v = value.cloned().unwrap_or_default();
+                        eprintln!("{}", lang.fmt(Msg::CliJobsRange, &[("value", &v)]));
+                        return ExitCode::from(2);
+                    }
+                }
+                i += 1;
+            }
             "--throttle" | "--top" | "--depth" => {
                 let n = match parse_number(lang, a, args.get(i + 1)) {
                     Ok(n) => n,
@@ -129,6 +142,7 @@ fn scan_command(args: &[String], lang: Lang) -> ExitCode {
         }
     };
     scan_args.options.throttle = throttle;
+    scan_args.options.jobs = jobs;
     if let Some(t) = top {
         scan_args.options.top_files = t;
     }

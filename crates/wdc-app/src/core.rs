@@ -18,6 +18,9 @@ use wdc_core::quarantine::{self, Entry as QEntry};
 use wdc_core::scan::{Progress, ScanReport};
 use wdc_core::tools;
 
+/// Threads of a scan started with the "Scan faster" switch.
+pub const FASTER_JOBS: usize = wdc_core::scan::MAX_JOBS;
+
 /// Who started the scan in progress.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScanBy {
@@ -369,8 +372,10 @@ impl AppCore {
         summary
     }
 
-    /// Starts a scan of the default read scope for the human (the Scan button).
-    pub fn start_human_scan(self: &Arc<Self>) {
+    /// Starts a scan of the default read scope for the human (the Scan button). With `faster`
+    /// (the "Scan faster" switch) the scan walks with [`FASTER_JOBS`] threads, each in
+    /// background mode, and returns the same report.
+    pub fn start_human_scan(self: &Arc<Self>, faster: bool) {
         if self.shared.lock().unwrap().scanning.is_some() {
             return;
         }
@@ -378,7 +383,10 @@ impl AppCore {
         std::thread::Builder::new()
             .name("scan".into())
             .spawn(move || {
-                if let Ok(args) = tools::parse_scan_args(&Value::Null) {
+                if let Ok(mut args) = tools::parse_scan_args(&Value::Null) {
+                    if faster {
+                        args.options.jobs = FASTER_JOBS;
+                    }
                     me.scan(ScanBy::Human, &args, None);
                 }
             })

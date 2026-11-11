@@ -42,6 +42,54 @@ fn mcp_client_scans_and_drills_down_headless() {
     wdc_testkit::remove_tree(&data);
 }
 
+/// Slice 6: `scan` takes `jobs` (1 to 4); the report is the same, and a value out of range is
+/// an error that names the range.
+#[test]
+fn scan_takes_jobs_from_one_to_four() {
+    let tree = fresh_dir("mcp-headless-jobs-tree");
+    for d in 0..12 {
+        let dir = tree.join(format!("d{d}")).join("deep");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.bin"), vec![1u8; 20_000 + d]).unwrap();
+    }
+    let data = fresh_dir("mcp-headless-jobs-data");
+    let mut c = McpClient::start(
+        std::path::Path::new(env!("CARGO_BIN_EXE_wdc")),
+        &[],
+        &[("WDC_DATA_DIR", data.as_os_str()), ("WDC_PIPE_SUFFIX", std::ffi::OsStr::new("-headless-jobs-test"))],
+    );
+    c.initialize("headless-jobs-test-client");
+    let tools = c.request("tools/list", serde_json::json!({}));
+    let scan = tools["tools"].as_array().unwrap().iter().find(|t| t["name"] == "scan").unwrap().clone();
+    assert_eq!(scan["inputSchema"]["properties"]["jobs"]["minimum"], 1);
+    assert_eq!(scan["inputSchema"]["properties"]["jobs"]["maximum"], 4);
+    assert!(scan["description"].as_str().unwrap().contains("only when the person is waiting"));
+
+    let roots = serde_json::json!([tree.to_string_lossy()]);
+    let one = c.call("scan", serde_json::json!({ "roots": roots, "jobs": 1 }));
+    let four = c.call("scan", serde_json::json!({ "roots": roots, "jobs": 4 }));
+    assert_ne!(one["isError"], true, "{one}");
+    assert_ne!(four["isError"], true, "{four}");
+    let strip = |r: &serde_json::Value| {
+        let mut s = r["structuredContent"].clone();
+        for k in ["started", "duration_ms", "snapshot"] {
+            s.as_object_mut().unwrap().remove(k);
+        }
+        s
+    };
+    assert_eq!(strip(&four), strip(&one));
+    assert_eq!(four["structuredContent"]["totals"]["files"], 12);
+
+    for bad in [serde_json::json!(9), serde_json::json!(0), serde_json::json!("4")] {
+        let r = c.call("scan", serde_json::json!({ "roots": roots, "jobs": bad }));
+        assert_eq!(r["isError"], true, "jobs {bad} is refused: {r}");
+        assert!(r.to_string().contains("1 to 4"), "the error names the range: {r}");
+    }
+    assert_eq!(c.close(), Some(0));
+    wdc_testkit::remove_tree(&tree);
+    wdc_testkit::remove_tree(&data);
+}
+
 /// Without the app there is no person to ask: `request_apply` answers `needs-human` and the
 /// planned item stays where it is (plan, section 4.6).
 #[test]

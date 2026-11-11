@@ -24,11 +24,20 @@ pub struct WdcApp {
     focus_node: Option<u32>,
     /// A folder whose "?" was pressed this frame.
     pending_explain: Option<u32>,
+    /// The "Scan faster" switch: off at every start, not saved.
+    scan_faster: bool,
 }
 
 impl WdcApp {
     pub fn new(core: Arc<AppCore>) -> WdcApp {
-        WdcApp { core, seen_focus: 0, open_path: HashSet::new(), focus_node: None, pending_explain: None }
+        WdcApp {
+            core,
+            seen_focus: 0,
+            open_path: HashSet::new(),
+            focus_node: None,
+            pending_explain: None,
+            scan_faster: false,
+        }
     }
 }
 
@@ -77,8 +86,10 @@ impl eframe::App for WdcApp {
                 ui.separator();
                 let scanning = core.shared.lock().unwrap().scanning.is_some();
                 if ui.add_enabled(!scanning, egui::Button::new(lang.t(Msg::AppScan))).clicked() {
-                    core.start_human_scan();
+                    core.start_human_scan(self.scan_faster);
                 }
+                ui.checkbox(&mut self.scan_faster, lang.t(Msg::AppScanFaster))
+                    .on_hover_text(lang.t(Msg::AppScanFasterHint));
                 ui.label(RichText::new(lang.t(Msg::AppReadOnlyNote)).weak());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let mut chosen = lang;
