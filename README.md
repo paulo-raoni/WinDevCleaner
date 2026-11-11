@@ -12,11 +12,22 @@ changes unless you approve it.
 
 ## Install
 
-Download `WinDevCleaner.msi` from the latest successful
-[windows workflow run](https://github.com/paulo-raoni/WinDevCleaner/actions/workflows/windows.yml)
-(it is in the build artifact of the "build, fixtures, MSI" job) and run it. It installs per user,
-without admin rights, to `%LOCALAPPDATA%\Programs\WinDevCleaner`, adds that folder to your `PATH`
-(open a new terminal to use `wdc`) and adds a Start menu shortcut. Uninstall it from Settings > Apps.
+Download `WinDevCleaner-<version>-x64.msi` from the
+[latest release](https://github.com/paulo-raoni/WinDevCleaner/releases/latest) (pre-releases are on
+the [releases page](https://github.com/paulo-raoni/WinDevCleaner/releases)) and run it. To run
+without installing, download `WinDevCleaner-<version>-x64.zip` instead; it holds `wdc.exe` and
+`WinDevCleaner.exe`. The MSI installs per user, without admin rights, to
+`%LOCALAPPDATA%\Programs\WinDevCleaner`, adds that folder to your `PATH` (open a new terminal to use
+`wdc`) and adds a Start menu shortcut. Uninstall it from Settings > Apps.
+
+To check a download, compare its hash with the matching line of `SHA256SUMS.txt` from the same release:
+
+```
+Get-FileHash .\WinDevCleaner-<version>-x64.msi -Algorithm SHA256
+```
+
+The MSI is not code-signed, so SmartScreen says "unknown publisher": choose "More info", then
+"Run anyway". What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Use
 

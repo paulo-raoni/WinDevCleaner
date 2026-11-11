@@ -7,7 +7,9 @@
   for the app. Uninstall removes all three. The tool's data folder
   (%LOCALAPPDATA%\WinDevCleaner: snapshots and the activity log) is left alone.
 
-  Build: wix build installer\WinDevCleaner.wxs -arch x64 -d Version=0.1.0 -d BinDir=target\release -o WinDevCleaner.msi
+  Build: wix build installer\WinDevCleaner.wxs -arch x64 -d Version=<major.minor.patch> -d BinDir=target\release -o WinDevCleaner.msi
+  An MSI version is numbers only: for 1.0.0-rc.1 pass the numeric core, 1.0.0. AllowSameVersionUpgrades
+  lets the final 1.0.0 replace the rc, which has the same MSI version.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
@@ -18,7 +20,7 @@
       Scope="perUser"
       Compressed="yes">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of WinDevCleaner is already installed." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of WinDevCleaner is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <StandardDirectory Id="LocalAppDataFolder">

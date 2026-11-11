@@ -3262,7 +3262,7 @@ dependencies = [
 
 [[package]]
 name = "wdc-app"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "eframe",
  "serde_json",
@@ -3274,7 +3274,7 @@ dependencies = [
 
 [[package]]
 name = "wdc-bench"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3285,7 +3285,7 @@ dependencies = [
 
 [[package]]
 name = "wdc-cli"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "rmcp",
  "serde_json",
@@ -3297,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "wdc-core"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "regex-lite",
  "ruzstd",
@@ -3313,7 +3313,7 @@ dependencies = [
 
 [[package]]
 name = "wdc-testkit"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "serde",
  "serde_json",
