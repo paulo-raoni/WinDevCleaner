@@ -17,6 +17,7 @@ pub mod i18n;
 pub mod link;
 pub mod plan;
 pub mod presence;
+pub mod programs;
 pub mod quarantine;
 pub mod rules;
 pub mod scan;

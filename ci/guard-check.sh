@@ -67,6 +67,8 @@ CASES=(
   "early-purge-class|wdc-core|apply_flow|early_purge_is_only_for_caches_and_leftovers_that_were_explained"
   "early-purge-class|wdc-cli|apply_cli|purge_before_seven_days_is_only_for_caches_and_leftovers_on_both_paths"
   "presence-code|wdc-cli|apply_cli|apply_with_the_desktop_code_then_restore_gives_the_identical_tree"
+  "leftover-exact|wdc-core|programs|a_folder_named_exactly_like_the_program_is_reported_and_a_longer_or_shorter_name_is_not"
+  "leftover-publisher|wdc-core|programs|a_publisher_folder_is_not_reported_while_another_program_has_that_publisher"
 )
 
 run_test() { # package target name log
