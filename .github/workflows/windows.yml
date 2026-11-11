@@ -68,8 +68,10 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           "WDC_VERSION=$version" >> $env:GITHUB_ENV
+          # An MSI version is numbers only (1.0.0-rc.1 builds as 1.0.0).
+          $msiVersion = $version -replace '[-+].*$', ''
           New-Item -ItemType Directory -Force ci-out | Out-Null
-          wix build installer\WinDevCleaner.wxs -arch x64 -d Version=$version -d BinDir=target\release -o ci-out\WinDevCleaner.msi
+          wix build installer\WinDevCleaner.wxs -arch x64 -d Version=$msiVersion -d BinDir=target\release -o ci-out\WinDevCleaner.msi
       - name: Install, run and uninstall the MSI
         shell: pwsh
         run: ci\msi-check.ps1 -Msi ci-out\WinDevCleaner.msi -Version $env:WDC_VERSION
@@ -83,7 +85,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windevcleaner-slice-1
+          name: windevcleaner
           path: ci-out
 
   budget:

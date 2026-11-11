@@ -1,0 +1,84 @@
+name: release
+
+# A tag `vX.Y.Z` (or `vX.Y.Z-pre.N`, published as a pre-release) builds the release on the free
+# windows-latest runner and publishes a GitHub Release with the MSI, a zip of both executables and
+# SHA256SUMS.txt. A pull request that changes this file or the installer runs the same build as a
+# dry run: everything but the publish, with the files uploaded as an artifact.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "installer/**"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: build and publish the release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Version from Cargo.toml, checked against the tag
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          # An MSI version is numbers only: 1.0.0-rc.1 installs as 1.0.0 (the installer allows a
+          # same-version upgrade, so 1.0.0 replaces it).
+          $msiVersion = $version -replace '[-+].*$', ''
+          if ($msiVersion -notmatch '^\d+\.\d+\.\d+$') { throw "MSI version '$msiVersion' from '$version' is not numeric" }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match the Cargo.toml version v$version"
+          }
+          $pre = if ($version -match '-') { 'true' } else { 'false' }
+          "WDC_VERSION=$version" >> $env:GITHUB_ENV
+          "WDC_MSI_VERSION=$msiVersion" >> $env:GITHUB_ENV
+          "WDC_PRERELEASE=$pre" >> $env:GITHUB_ENV
+          "Version $version, MSI $msiVersion, pre-release $pre"
+      - name: Build both executables (release)
+        run: cargo build --release --locked --workspace --bins
+      - name: Unit and fixture tests
+        run: cargo test --release --locked --workspace
+      - name: Build the MSI (WiX v5)
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          New-Item -ItemType Directory -Force dist | Out-Null
+          wix build installer\WinDevCleaner.wxs -arch x64 -d Version=$env:WDC_MSI_VERSION -d BinDir=target\release -o "dist\WinDevCleaner-$env:WDC_VERSION-x64.msi"
+      - name: Install, run and uninstall the MSI
+        shell: pwsh
+        run: ci\msi-check.ps1 -Msi "dist\WinDevCleaner-$env:WDC_VERSION-x64.msi" -Version $env:WDC_VERSION
+      - name: Zip and checksums
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target\release\wdc.exe, target\release\WinDevCleaner.exe, README.md, CHANGELOG.md, LICENSE -DestinationPath "dist\WinDevCleaner-$env:WDC_VERSION-x64.zip"
+          Get-ChildItem dist -File | Sort-Object Name | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content -Encoding ascii dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+      - name: Publish the GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $flags = @('--title', "WinDevCleaner $env:GITHUB_REF_NAME", '--verify-tag', '--generate-notes',
+                     '--notes', 'What changed is in CHANGELOG.md. Check a download with Get-FileHash against SHA256SUMS.txt.')
+          if ($env:WDC_PRERELEASE -eq 'true') { $flags += '--prerelease' } else { $flags += '--latest' }
+          gh release create $env:GITHUB_REF_NAME (Get-ChildItem dist -File).FullName @flags
