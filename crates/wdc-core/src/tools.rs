@@ -21,6 +21,7 @@ pub const SCAN: &str = "scan";
 pub const TREE: &str = "tree";
 pub const DIFF: &str = "diff";
 pub const SYSTEM_ITEMS: &str = "system_items";
+pub const PROGRAMS: &str = "programs";
 pub const EXPLAIN: &str = "explain";
 pub const PLAN: &str = "plan";
 pub const QUARANTINE: &str = "quarantine";
@@ -111,6 +112,18 @@ pub fn specs() -> Vec<ToolSpec> {
             description: "Space Windows itself manages, read through Windows' own APIs: Recycle Bin, paging, swap and \
                 hibernation files, error reports, crash and memory dumps, System Restore. Always report-only; each \
                 item names the Windows setting or tool that manages it. When the app is open, the app shows them.",
+            schema: || json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        },
+        ToolSpec {
+            name: PROGRAMS,
+            description: "Installed programs from the per-user and per-machine uninstall registry keys: name, version, \
+                publisher, install date, scope and the size the installer reports (not a measured size), each with the \
+                program's own uninstall command for the person to run. Then the folders left behind by programs \
+                uninstalled since the last look, only those directly inside %APPDATA%, %LOCALAPPDATA% or \
+                %LOCALAPPDATA%\\Programs and named exactly like the program or its publisher (a publisher only when no \
+                installed program has it): `install-leftover` candidates a person must confirm, never actionable. \
+                Read-only: nothing is run, moved or written to the registry; the list is saved in the tool's data \
+                folder for the next look. Store apps are not included. When the app is open, the app shows it.",
             schema: || json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         },
         ToolSpec {
@@ -305,6 +318,14 @@ pub fn run_diff(data_dir: &Path, opts: crate::diff::DiffOptions) -> Result<crate
 pub fn run_system_items() -> Value {
     let items = crate::system::system_items();
     json!({ "total_bytes": crate::system::total(&items), "items": items })
+}
+
+/// `programs`: installed programs and the folders their uninstalls left behind. Read-only; the
+/// list of this look is saved in the data folder for the next one.
+pub fn run_programs(data_dir: &Path) -> (crate::programs::Report, Value) {
+    let report = crate::programs::look(&crate::programs::default_sources(), data_dir, &crate::programs::leftover_roots());
+    let value = report.to_json();
+    (report, value)
 }
 
 /// Parsed arguments of `tree`.

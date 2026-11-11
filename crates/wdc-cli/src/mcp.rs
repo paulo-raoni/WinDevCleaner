@@ -44,6 +44,7 @@ const INSTRUCTIONS: &str = "WinDevCleaner finds where disk space is on Windows a
 `explain` says why a path is here, which rule knows it and what deleting it would free \
 (for NVIDIA update artifacts it also gives `manual_steps`: the exact steps for the person, the tool never deletes them), \
 and `system_items` reports the space Windows manages (Recycle Bin, paging and hibernation files, dumps). \
+`programs` lists installed programs with the size each installer reports and its own uninstall command for the person to run (you cannot run it), then the folders an uninstall left behind as candidates a person must confirm. \
 `plan` drafts what built-in rules may move to quarantine now, each item explained, and `quarantine` lists what is held. \
 You cannot apply, purge or restore: `request_apply` asks the person, who approves in the app with Windows Hello; \
 with the app closed it returns `needs-human` and nothing changes. When the WinDevCleaner app is open, the user watches every \
@@ -144,6 +145,7 @@ fn run_call(backend: &mut Backend, tool: &str, args: Value) -> Result<Value, Str
                 serde_json::to_value(d).map_err(|e| e.to_string())
             }
             tools::SYSTEM_ITEMS => Ok(tools::run_system_items()),
+            tools::PROGRAMS => Ok(tools::run_programs(&wdc_core::scope::data_dir()).1),
             tools::EXPLAIN => {
                 let path = tools::parse_explain_args(&args)?;
                 let e = tools::run_explain(&path, &wdc_core::scope::data_dir());
