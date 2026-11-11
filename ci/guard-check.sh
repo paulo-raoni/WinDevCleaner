@@ -21,6 +21,8 @@ mkdir -p "$(dirname "$REPORT")" "$LOGS"
 CASES=(
   "hardlink-dedup|wdc-core|fixtures|hard_link_with_both_names_inside_the_root_counts_once"
   "hardlink-dedup|wdc-core|fixtures|hard_link_with_a_name_outside_the_root_counts_once_and_reports_both_names"
+  "hardlink-dedup|wdc-core|fixtures|hard_link_names_in_sibling_folders_count_once_with_4_jobs"
+  "hardlink-dedup|wdc-core|fixtures|hard_link_with_a_name_outside_the_root_counts_once_with_4_jobs"
   "large-file-recheck|wdc-core|fixtures|hard_link_with_a_name_outside_the_root_counts_once_and_reports_both_names"
   "large-file-recheck|wdc-core|fixtures|stale_size_in_another_names_directory_entry_is_corrected"
   "no-follow-links|wdc-core|fixtures|junctions_and_symbolic_links_are_recorded_and_never_followed"
@@ -67,6 +69,9 @@ CASES=(
   "early-purge-class|wdc-core|apply_flow|early_purge_is_only_for_caches_and_leftovers_that_were_explained"
   "early-purge-class|wdc-cli|apply_cli|purge_before_seven_days_is_only_for_caches_and_leftovers_on_both_paths"
   "presence-code|wdc-cli|apply_cli|apply_with_the_desktop_code_then_restore_gives_the_identical_tree"
+  "leftover-exact|wdc-core|programs|a_folder_named_exactly_like_the_program_is_reported_and_a_longer_or_shorter_name_is_not"
+  "leftover-publisher|wdc-core|programs|a_publisher_folder_is_not_reported_while_another_program_has_that_publisher"
+  "leftover-name-installed|wdc-core|programs|a_renamed_publisher_does_not_make_an_installed_program_leave_a_folder"
 )
 
 run_test() { # package target name log

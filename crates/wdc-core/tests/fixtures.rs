@@ -20,6 +20,11 @@ fn scan_roots(roots: &[&Path]) -> ScanReport {
     scan(&opts, None, None)
 }
 
+fn scan_roots_with_jobs(roots: &[&Path], jobs: usize) -> ScanReport {
+    let opts = ScanOptions { roots: roots.iter().map(|p| p.to_path_buf()).collect(), jobs, ..Default::default() };
+    scan(&opts, None, None)
+}
+
 fn file_bytes(r: &ScanReport, name: &str) -> Option<(u64, u32)> {
     r.top_files.iter().find(|f| f.path.ends_with(name)).map(|f| (f.bytes_on_disk, f.links))
 }
@@ -65,6 +70,67 @@ fn hard_link_with_a_name_outside_the_root_counts_once_and_reports_both_names() {
     // Scanning both folders in one scan still counts the file once.
     let r = scan_roots(&[&root, &outside]);
     guard_assert_eq!("hardlink-dedup", r.totals.bytes_on_disk, truth.allocation, "two roots, one file");
+    remove_tree(&base);
+}
+
+/// Slice 6: the same two cases with 4 workers, the names in sibling folders so that different
+/// workers meet them. A file counts once however the workers share the folders.
+#[test]
+fn hard_link_names_in_sibling_folders_count_once_with_4_jobs() {
+    let base = fresh_dir("hl-inside-jobs");
+    let root = base.join("root");
+    let first = root.join("s0");
+    std::fs::create_dir_all(&first).unwrap();
+    let a = first.join("bundle.vhdx");
+    write_file(&a, 64 * MIB);
+    let names = 8u64;
+    for i in 1..names {
+        let dir = root.join(format!("s{i}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::hard_link(&a, dir.join("bundle.vhdx")).unwrap();
+    }
+    let truth = facts_by_handle(&a);
+    assert_eq!(truth.links, names as u32);
+
+    for round in 0..3 {
+        let r = scan_roots_with_jobs(&[&root], 4);
+        assert_eq!(r.totals.files, names, "every name is listed");
+        guard_assert_eq!("hardlink-dedup", r.totals.bytes_on_disk, truth.allocation, "round {round}: a 64 MB file with {names} names counts once");
+        guard_assert_eq!("hardlink-dedup", r.totals.hardlink_duplicates, names - 1, "round {round}: every other name is a duplicate");
+    }
+    remove_tree(&base);
+}
+
+#[test]
+fn hard_link_with_a_name_outside_the_root_counts_once_with_4_jobs() {
+    let base = fresh_dir("hl-outside-jobs");
+    let root = base.join("root");
+    let outside = base.join("outside");
+    for d in ["a", "b", "c"] {
+        std::fs::create_dir_all(root.join(d)).unwrap();
+        std::fs::create_dir_all(outside.join(d)).unwrap();
+    }
+    let inside_name = root.join("a").join("bundle.vhdx");
+    write_file(&inside_name, 64 * MIB);
+    std::fs::hard_link(&inside_name, root.join("b").join("bundle.vhdx")).unwrap();
+    std::fs::hard_link(&inside_name, root.join("c").join("bundle.vhdx")).unwrap();
+    std::fs::hard_link(&inside_name, outside.join("a").join("bundle.vhdx")).unwrap();
+    std::fs::hard_link(&inside_name, outside.join("b").join("bundle.vhdx")).unwrap();
+    let truth = facts_by_handle(&inside_name);
+    assert_eq!(truth.links, 5);
+
+    for round in 0..3 {
+        // Three names in the root: one count, and the scanner knows the file has five names.
+        let r = scan_roots_with_jobs(&[&root], 4);
+        guard_assert_eq!("hardlink-dedup", r.totals.bytes_on_disk, truth.allocation, "round {round}: three names in the root count once");
+        let (_, links) = file_bytes(&r, "bundle.vhdx").expect("the 64 MB file is in the top files");
+        assert_eq!(links, 5, "the link count is read from the file itself");
+
+        // Both folders in one scan still count the file once.
+        let r = scan_roots_with_jobs(&[&root, &outside], 4);
+        guard_assert_eq!("hardlink-dedup", r.totals.bytes_on_disk, truth.allocation, "round {round}: two roots, one file");
+        guard_assert_eq!("hardlink-dedup", r.totals.hardlink_duplicates, 4, "round {round}: four names are duplicates");
+    }
     remove_tree(&base);
 }
 

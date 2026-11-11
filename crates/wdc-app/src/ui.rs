@@ -24,11 +24,20 @@ pub struct WdcApp {
     focus_node: Option<u32>,
     /// A folder whose "?" was pressed this frame.
     pending_explain: Option<u32>,
+    /// The "Scan faster" switch: off at every start, not saved.
+    scan_faster: bool,
 }
 
 impl WdcApp {
     pub fn new(core: Arc<AppCore>) -> WdcApp {
-        WdcApp { core, seen_focus: 0, open_path: HashSet::new(), focus_node: None, pending_explain: None }
+        WdcApp {
+            core,
+            seen_focus: 0,
+            open_path: HashSet::new(),
+            focus_node: None,
+            pending_explain: None,
+            scan_faster: false,
+        }
     }
 }
 
@@ -53,6 +62,7 @@ fn describe(lang: Lang, e: &Entry) -> String {
             wdc_core::tools::TREE => lang.fmt(Msg::AppActTree, &[("path", target)]),
             wdc_core::tools::DIFF => lang.t(Msg::AppActDiff).to_string(),
             wdc_core::tools::SYSTEM_ITEMS => lang.t(Msg::AppActSystem).to_string(),
+            wdc_core::tools::PROGRAMS => lang.t(Msg::AppActPrograms).to_string(),
             wdc_core::tools::EXPLAIN => lang.fmt(Msg::AppActExplain, &[("path", target)]),
             wdc_core::tools::PLAN => lang.t(Msg::AppActPlan).to_string(),
             wdc_core::tools::QUARANTINE => lang.t(Msg::AppActQuarantine).to_string(),
@@ -76,8 +86,10 @@ impl eframe::App for WdcApp {
                 ui.separator();
                 let scanning = core.shared.lock().unwrap().scanning.is_some();
                 if ui.add_enabled(!scanning, egui::Button::new(lang.t(Msg::AppScan))).clicked() {
-                    core.start_human_scan();
+                    core.start_human_scan(self.scan_faster);
                 }
+                ui.checkbox(&mut self.scan_faster, lang.t(Msg::AppScanFaster))
+                    .on_hover_text(lang.t(Msg::AppScanFasterHint));
                 ui.label(RichText::new(lang.t(Msg::AppReadOnlyNote)).weak());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let mut chosen = lang;
@@ -206,6 +218,7 @@ impl eframe::App for WdcApp {
                     (View::Space, Msg::AppWhereIsMySpace),
                     (View::Growth, Msg::AppTabGrowth),
                     (View::System, Msg::AppTabSystem),
+                    (View::Programs, Msg::AppTabPrograms),
                     (View::Explain, Msg::AppTabExplain),
                     (View::Plan, Msg::AppTabPlan),
                     (View::Quarantine, Msg::AppTabQuarantine),
@@ -226,6 +239,10 @@ impl eframe::App for WdcApp {
                 }
                 View::System => {
                     system_view(ui, lang, &core);
+                    return;
+                }
+                View::Programs => {
+                    programs_view(ui, lang, &core);
                     return;
                 }
                 View::Explain => {
@@ -419,6 +436,78 @@ fn system_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
             });
             ui.label(RichText::new(lang.t(it.kind.managed_by())).weak());
             ui.add_space(4.0);
+        }
+    });
+}
+
+/// Installed programs: read-only. Each program's own uninstall command is shown for the person
+/// to copy; the app never runs it. Then the folders an uninstall left behind, as candidates.
+fn programs_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
+    use wdc_core::programs::Scope;
+    if ui.button(lang.t(Msg::AppReadPrograms)).clicked() {
+        core.start_programs();
+    }
+    let report = core.shared.lock().unwrap().programs.clone();
+    let Some(report) = report else {
+        ui.label(lang.t(Msg::AppProgramsNotRead));
+        return;
+    };
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.label(
+            RichText::new(lang.fmt(Msg::CliProgramsHeader, &[("n", &fmt::count(report.programs.len() as u64))])).weak(),
+        );
+        if report.programs.is_empty() {
+            ui.label(lang.t(Msg::CliProgramsNone));
+        }
+        ui.add_space(4.0);
+        for p in &report.programs {
+            let size = p.reported_size_bytes.map(fmt::bytes).unwrap_or_else(|| lang.t(Msg::CliProgramsNoSize).to_string());
+            let scope = lang.t(match p.scope {
+                Scope::User => Msg::ProgScopeUser,
+                Scope::Machine => Msg::ProgScopeMachine,
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(format!("{size:>10}")).monospace().strong());
+                ui.label(RichText::new(&p.name).strong());
+                for extra in [p.version.as_deref(), p.publisher.as_deref(), p.install_date.as_deref()].into_iter().flatten() {
+                    ui.label(RichText::new(extra).weak());
+                }
+                ui.label(RichText::new(format!("[{scope}]")).weak());
+            });
+            match &p.uninstall_command {
+                Some(c) => {
+                    ui.add(egui::Label::new(RichText::new(c).monospace()).selectable(true));
+                }
+                None => {
+                    ui.label(RichText::new(lang.t(Msg::CliProgramsNoCommand)).weak());
+                }
+            }
+            if let Some(c) = &p.quiet_uninstall_command {
+                ui.label(RichText::new(lang.t(Msg::AppProgramsQuietLabel)).weak());
+                ui.add(egui::Label::new(RichText::new(c).monospace()).selectable(true));
+            }
+            ui.add_space(4.0);
+        }
+        ui.separator();
+        for e in &report.errors {
+            ui.label(RichText::new(lang.fmt(Msg::CliProgramsReadError, &[("error", e)])).color(Color32::from_rgb(0xeb, 0x57, 0x57)));
+        }
+        if report.first_look {
+            ui.label(lang.t(Msg::CliProgramsFirstLook));
+        } else if report.leftovers_checked {
+            if report.leftovers.is_empty() {
+                ui.label(lang.t(Msg::CliProgramsLeftoversNone));
+            } else {
+                ui.label(RichText::new(lang.t(Msg::CliProgramsLeftoversHeader)).strong());
+                for l in &report.leftovers {
+                    ui.add(egui::Label::new(RichText::new(&l.folder).monospace()).selectable(true));
+                    ui.label(
+                        RichText::new(l.why(lang)).weak(),
+                    );
+                    ui.label(RichText::new(lang.fmt(Msg::ProgLeftoverNote, &[("explain", &l.explain)])).weak());
+                    ui.add_space(4.0);
+                }
+            }
         }
     });
 }

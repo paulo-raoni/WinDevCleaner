@@ -1,0 +1,82 @@
+# Developer tool caches and old temporary files (plan, section 4.2). Rules are data reviewed like
+# code and compiled into wdc.exe. Every item is a regenerable cache: the tool downloads or builds
+# it again when it is needed.
+
+[[rule]]
+id = "pip-cache"
+title = "pip download and wheel cache"
+title_pt_br = "Cache de downloads e wheels do pip"
+class = "regenerable-cache"
+action = "quarantine"
+paths = [
+  '%LOCALAPPDATA%\pip\Cache',
+  '%LOCALAPPDATA%\Packages\PythonSoftwareFoundation.Python.*\LocalCache\Local\pip\Cache',
+]
+evidence = "pip keeps downloaded packages and built wheels here so a later install can reuse them; `pip cache purge` removes the same folder. The second path is the same cache for a Python from the Microsoft Store, whose %LOCALAPPDATA% is redirected into its package folder."
+evidence_pt_br = "O pip guarda aqui os pacotes baixados e os wheels construídos para reaproveitar em instalações futuras; `pip cache purge` remove a mesma pasta. O segundo caminho é o mesmo cache de um Python da Microsoft Store, cujo %LOCALAPPDATA% é redirecionado para a pasta do pacote."
+source = "pip documentation, Caching (default cache location on Windows: %LocalAppData%\\pip\\Cache); Microsoft Store Python packages virtualize AppData under LocalCache\\Local."
+cost = "Packages are downloaded or built again on the next install."
+cost_pt_br = "Os pacotes são baixados ou construídos de novo na próxima instalação."
+instructions = "pip cache purge"
+instructions_pt_br = "pip cache purge"
+last_verified = "2026-11-11"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["pip.exe", "pip3.exe"]
+
+[[rule]]
+id = "uv-cache"
+title = "uv cache"
+title_pt_br = "Cache do uv"
+class = "regenerable-cache"
+action = "quarantine"
+paths = ['%LOCALAPPDATA%\uv\cache']
+evidence = "uv keeps downloaded packages, built wheels and environments here; `uv cache clean` removes the same folder."
+evidence_pt_br = "O uv guarda aqui os pacotes baixados, os wheels construídos e os ambientes; `uv cache clean` remove a mesma pasta."
+source = "uv documentation, Caching (default cache directory on Windows: %LOCALAPPDATA%\\uv\\cache)."
+cost = "Packages are downloaded or built again on the next install."
+cost_pt_br = "Os pacotes são baixados ou construídos de novo na próxima instalação."
+instructions = "uv cache clean"
+instructions_pt_br = "uv cache clean"
+last_verified = "2026-11-11"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["uv.exe", "uvx.exe"]
+
+[[rule]]
+id = "playwright-browsers"
+title = "Playwright downloaded browser"
+title_pt_br = "Navegador baixado pelo Playwright"
+class = "regenerable-cache"
+action = "quarantine"
+paths = ['%LOCALAPPDATA%\ms-playwright\*']
+evidence = "Each folder is a browser build Playwright downloaded (chromium-1148, firefox-1471, ffmpeg-1011, ...) or Playwright's own bookkeeping (such as `.links`), which Playwright re-creates. `npx playwright install` downloads the builds a project needs again."
+evidence_pt_br = "Cada pasta é uma versão de navegador que o Playwright baixou (chromium-1148, firefox-1471, ffmpeg-1011, ...) ou um controle interno do próprio Playwright (como `.links`), que o Playwright recria. `npx playwright install` baixa de novo as versões de que um projeto precisa."
+source = "Playwright documentation, Browsers (browsers are installed to %USERPROFILE%\\AppData\\Local\\ms-playwright on Windows)."
+cost = "Each browser is downloaded again (hundreds of MB each) before the next test run."
+cost_pt_br = "Cada navegador é baixado de novo (centenas de MB cada) antes da próxima execução de testes."
+instructions = "npx playwright install downloads them again."
+instructions_pt_br = "npx playwright install baixa de novo."
+last_verified = "2026-11-11"
+
+[[rule]]
+id = "temp-old"
+title = "Old temporary file or folder"
+title_pt_br = "Arquivo ou pasta temporária antiga"
+class = "regenerable-cache"
+action = "quarantine"
+paths = ['%TEMP%\*']
+evidence = "Each direct child of the temporary folder whose own date is more than 7 days old (a folder whose contents changed recently can still qualify). Programs use %TEMP% for scratch files and do not need them after they finish; Windows' own Storage settings clean the same folder by age. The temporary folder itself is never an item."
+evidence_pt_br = "Cada item direto da pasta temporária cuja própria data tem mais de 7 dias (uma pasta cujo conteúdo mudou há pouco ainda pode se qualificar). Os programas usam %TEMP% para arquivos de trabalho e não precisam deles depois de terminar; a limpeza de Armazenamento do próprio Windows limpa a mesma pasta por idade. A pasta temporária em si nunca é um item."
+source = "Windows Settings > System > Storage > Temporary files; Windows API GetTempPath (%TEMP% is the per-user scratch folder)."
+cost = "None for a finished program. A file still in use stays in place when applied."
+cost_pt_br = "Nenhum para um programa já encerrado. Um arquivo em uso permanece no lugar ao aplicar."
+instructions = "Windows: Settings > System > Storage > Temporary files."
+instructions_pt_br = "Windows: Configurações > Sistema > Armazenamento > Arquivos temporários."
+last_verified = "2026-11-11"
+
+[[rule.require]]
+kind = "older-than"
+days = 7

@@ -521,7 +521,25 @@ tests run on a GitHub Actions `windows-latest` runner, free because the reposito
 | 3. **Why is this here, and what would deleting it free?** | `explain` everywhere: rule match, class, evidence, every name of a hard-linked file and its true size on disk. The first rules: the VS Code family, NVIDIA artifacts and shader caches, Steam, Claude desktop data (report-only), Windows items (never-touch). Unknown large or growing folders are flagged. | fixture trees per rule (an `.obsolete` list, GUID folders, driver versions older, equal and newer than installed, the Windows-to-NVIDIA version conversion); the Cowork case reproduced: two names, one outside the plan, "expected freed: 0"; a local rule file cannot make an item actionable. |
 | 4. **Clean the VS Code leftovers safely** (first slice that changes the disk) | An agent drafts a plan, the app shows the approval card, the owner approves with Windows Hello; items move to quarantine, free space is measured before and after, early purge is allowed for caches and install leftovers, `restore` works. The same from `wdc apply` with presence proof. | on a small VHDX created by the test: apply then restore gives an identical tree; restore refuses when the folder was recreated; an item swapped for a junction after planning moves nothing; a condition that became false (fake process started) skips the item; a forbidden-root suite (`..`, short names, trailing dots, a junction into `C:\Windows`, user folders, an allowed root itself); purge before 7 days refuses items that are neither cache nor install leftover, on both paths; the hard-link fixture reports expected 0 and measures 0; apply without presence proof refuses, also from a pseudo-console (ConPTY) and from MCP without the app. |
 | 5. **Clean the other known cases** | The cleaning path of slice 4 opened to the shader caches, Steam and the other cache rules; NVIDIA stays report-only in version 1 with exact steps. | the slice-4 suite run for each rule's fixture. |
-| 6. **Faster scan when I am waiting** (only if measured worth it) | Optional `--jobs` (at most 4) and the app's "scan faster" switch; optional whole-C: overview. | cold-cache benchmark shows more than 2x gain for `--jobs 4`; otherwise this slice is dropped and the reason recorded. |
+| 6. **Faster scan when I am waiting** (only if measured worth it) | Optional `--jobs` (at most 4) and the app's "scan faster" switch; optional whole-C: overview. | cold-cache benchmark shows more than 2x gain for `--jobs 4`; otherwise this slice is dropped and the reason recorded. **Built on the owner's decision of 2026-11-11** at 1.66x: see below. |
+| 7. **Which programs take the space, and how do I remove one?** (section 5.5) | `wdc programs`, the app's programs view and an MCP tool: installed programs from the per-user and per-machine uninstall keys with size and install date, and the program's own uninstall command or `winget uninstall --id <exact id>` for the human to run; after an uninstall, leftover folders in the allowed roots named exactly as the publisher or product are reported as `install-leftover` candidates. Read-only: the replacement of the old Obliterate mode. | fixture uninstall keys (per-user and per-machine, 32- and 64-bit views) read back exactly; a leftover named by exact match is reported and a substring is not; nothing on disk or in the registry changes. |
+| 8. **Clean the caches the old tool cleaned** | Rules for the old SAFE list that had none: Edge's cache subfolders, pip's cache (also the Store Python's), uv's cache, Playwright's downloaded browsers, and old files in `%TEMP%`; each through the slice-4 path. | each rule's fixture through the per-rule apply suite; Edge profile data next to its cache stays forbidden. |
+
+**Slice 6 measured, then decided by the owner (2026-11-11).** The budget check measured, on the
+`windows-latest` runner, a cold walk of the 202,108-file, 25,015-folder fixture on a VHDX detached and
+re-attached before each run, with the scanner's own Windows calls: 1 worker 4,831 ms, 4 workers 2,914 ms
+(medians of 3, interleaved), a ratio of 1.66. The 2x threshold above was written by the session that
+drafted this plan, not decided by the owner; a session first applied it and dropped the slice. The
+owner's words: "why would I leave out an improvement that gives me a 40% gain?" So the slice is built:
+`--jobs` up to 4, opt-in, the default staying one thread in background mode. The optional whole-C:
+overview is not part of it. The measurement stays in the budget report
+(`tools/wdc-bench/src/parallel.rs`).
+
+Slice 7 was missing from this table although section 5.5 asks for it: without it, the old Obliterate
+mode would have no replacement (section 10, point 2). It was added on 2026-11-11.
+
+Slice 8 was added on 2026-11-11 for the same reason: the old tool's standard clean emptied caches no
+rule covered. The owner approved it the same day.
 
 Slice 1 is the largest because the skeleton touches every face at once; each later slice is
 smaller. Slices 1 to 3 never change the disk and already would have found and explained all three
@@ -553,8 +571,8 @@ watched in Task Manager for CPU and memory.
 
 ## 10. Definition of done for the rebuild
 
-1. Slices 1 to 5 are merged, each with its tests passing on the Windows runner; slice 6 is merged
-   or dropped with its measured reason.
+1. Slices 1 to 5 are merged, each with its tests passing on the Windows runner; slices 6, 7 and 8
+   are merged.
 2. Every capability of the old tool that is kept has a replacement; the ones dropped (Deep, Nuclear,
    Obliterate deletion) are listed in the README with the reason.
 3. The README is rewritten for the new tool.

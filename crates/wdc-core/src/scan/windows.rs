@@ -3,7 +3,6 @@
 //! any file (plan, section 6.1). Falls back to `FileIdBothDirectoryInfo` on file systems
 //! without the extended class.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Foundation::{
@@ -20,7 +19,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_STANDARD_INFO, OPEN_EXISTING, SYNCHRONIZE,
 };
 
-use super::{Collector, LinkKind, RootReport, TopFile, DEDUP_THRESHOLD, NO_PARENT, VERIFY_THRESHOLD};
+use super::parallel::{self, DirWalker};
+use super::{Collector, LinkKind, RootReport, SerialSink, Sink, NO_PARENT, VERIFY_THRESHOLD};
 use crate::win::{display_path, last_error, verbatim, OwnedHandle};
 
 const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
@@ -222,13 +222,17 @@ fn upper(w: &[u16]) -> Vec<u16> {
     String::from_utf16_lossy(w).to_uppercase().encode_utf16().collect()
 }
 
+/// A folder to list: its verbatim path, and the serial number of the volume it is on (so file
+/// IDs from different volumes never collide).
+pub(crate) struct WPath {
+    w: Vec<u16>,
+    volume: u64,
+}
+
 pub(crate) struct Walker {
     excluded: Vec<Vec<u16>>,
     buf: Vec<u64>,
     class: InfoClass,
-    /// Large files already counted, by (volume serial, file ID), across every root of the
-    /// scan: a file with one name in each of two roots is still counted once.
-    seen: HashSet<(u64, u128)>,
 }
 
 impl Walker {
@@ -238,7 +242,7 @@ impl Walker {
             .filter_map(|p| verbatim(p).ok())
             .map(|w| upper(&w))
             .collect();
-        Walker { excluded, buf: vec![0u64; 64 * 1024 / 8], class: InfoClass::Extended, seen: HashSet::new() }
+        Walker { excluded, buf: vec![0u64; 64 * 1024 / 8], class: InfoClass::Extended }
     }
 
     fn is_excluded(&self, path: &[u16]) -> bool {
@@ -301,85 +305,105 @@ impl Walker {
         }
 
         let volume = volume_serial(&h);
-        let mut seen = std::mem::take(&mut self.seen);
         let root_idx = c.add_dir(display, NO_PARENT);
         report.node = Some(root_idx);
 
-        // Depth-first walk with an explicit stack: (node, verbatim path, handle if open).
-        let mut stack: Vec<(u32, Vec<u16>, Option<OwnedHandle>)> = vec![(root_idx, root_w, Some(h))];
+        if c.jobs > 1 {
+            // Each worker opens the folders it lists; the root's handle is not needed.
+            drop(h);
+            parallel::walk_tree(c, root_idx, WPath { w: root_w, volume }, self);
+            return report;
+        }
+
+        // Depth-first walk with an explicit stack: (node, path, handle if open).
+        let mut stack: Vec<(u32, WPath, Option<OwnedHandle>)> = vec![(root_idx, WPath { w: root_w, volume }, Some(h))];
         while let Some((dir, path, handle)) = stack.pop() {
             if c.cancelled() {
                 break;
             }
-            let h = match handle {
-                Some(h) => h,
-                None => match open_dir(&path) {
-                    Ok(h) => h,
-                    Err(code) => {
-                        c.add_error(display_path(&path), code);
-                        continue;
-                    }
-                },
-            };
-            c.between_dirs(|| display_path(&path));
-
-            let mut subdirs: Vec<(Vec<u16>, Vec<u16>)> = Vec::new();
-            let mut class = self.class;
-            let mut buf = std::mem::take(&mut self.buf);
-            let excluded_check = |p: &[u16]| self.is_excluded(p);
-            let result = list_dir(&h, &mut class, &mut buf, |e| {
-                let mut full = Vec::with_capacity(path.len() + 1 + e.name.len());
-                full.extend_from_slice(&path);
-                if full.last() != Some(&(b'\\' as u16)) {
-                    full.push(b'\\' as u16);
-                }
-                full.extend_from_slice(e.name);
-
-                // GUARD-BEGIN(no-follow-links)
-                if e.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 && is_name_surrogate(e.reparse_tag) {
-                    let is_dir = e.attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
-                    c.add_link(display_path(&full), link_kind(e.reparse_tag), is_dir);
-                    return;
-                }
-                // GUARD-END(no-follow-links)
-
-                if e.attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
-                    if excluded_check(&full) {
-                        c.add_excluded(display_path(&full));
-                    } else {
-                        subdirs.push((e.name.to_vec(), full));
-                    }
-                    return;
-                }
-
-                measure_file(e, &full, dir, volume, &mut seen, c);
-            });
-            self.buf = buf;
-            self.class = class;
-            drop(h);
-            if let Err(code) = result {
-                c.add_error(display_path(&path), code);
-            }
-            // Push in reverse so the walk visits names in listing order.
-            for (name, full) in subdirs.into_iter().rev() {
-                let idx = c.add_dir(crate::win::from_wide(&name), dir);
-                stack.push((idx, full, None));
+            c.between_dirs(|| display_path(&path.w));
+            let subdirs = self.list_with(&path, handle, &mut SerialSink { c, dir });
+            // Pushed in reverse so the walk visits names in listing order.
+            for (name, child) in subdirs.into_iter().rev() {
+                let idx = c.add_dir(name, dir);
+                stack.push((idx, child, None));
             }
         }
-        self.seen = seen;
         report
+    }
+
+    /// Lists one folder, through `handle` when it is already open. Returns its sub-folders.
+    fn list_with<S: Sink>(&mut self, path: &WPath, handle: Option<OwnedHandle>, sink: &mut S) -> Vec<(String, WPath)> {
+        let h = match handle {
+            Some(h) => h,
+            None => match open_dir(&path.w) {
+                Ok(h) => h,
+                Err(code) => {
+                    sink.error(display_path(&path.w), code);
+                    return Vec::new();
+                }
+            },
+        };
+
+        let mut subdirs: Vec<(String, WPath)> = Vec::new();
+        let mut class = self.class;
+        let mut buf = std::mem::take(&mut self.buf);
+        let excluded_check = |p: &[u16]| self.is_excluded(p);
+        let result = list_dir(&h, &mut class, &mut buf, |e| {
+            let mut full = Vec::with_capacity(path.w.len() + 1 + e.name.len());
+            full.extend_from_slice(&path.w);
+            if full.last() != Some(&(b'\\' as u16)) {
+                full.push(b'\\' as u16);
+            }
+            full.extend_from_slice(e.name);
+
+            // GUARD-BEGIN(no-follow-links)
+            if e.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 && is_name_surrogate(e.reparse_tag) {
+                let is_dir = e.attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+                sink.link(display_path(&full), link_kind(e.reparse_tag), is_dir);
+                return;
+            }
+            // GUARD-END(no-follow-links)
+
+            if e.attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+                if excluded_check(&full) {
+                    sink.excluded(display_path(&full));
+                } else {
+                    subdirs.push((crate::win::from_wide(e.name), WPath { w: full, volume: path.volume }));
+                }
+                return;
+            }
+
+            measure_file(e, &full, path.volume, sink);
+        });
+        self.buf = buf;
+        self.class = class;
+        drop(h);
+        if let Err(code) = result {
+            sink.error(display_path(&path.w), code);
+        }
+        subdirs
+    }
+}
+
+impl DirWalker for Walker {
+    type Path = WPath;
+
+    fn fork(&self) -> Walker {
+        Walker { excluded: self.excluded.clone(), buf: vec![0u64; 64 * 1024 / 8], class: self.class }
+    }
+
+    fn display(path: &WPath) -> String {
+        display_path(&path.w)
+    }
+
+    fn list<S: Sink>(&mut self, path: &WPath, sink: &mut S) -> Vec<(String, WPath)> {
+        self.list_with(path, None, sink)
     }
 }
 
 #[allow(unused_assignments, unused_mut)]
-fn measure_file(
-    e: &Entry,
-    full: &[u16],
-    dir: u32,
-    volume: u64,
-    seen: &mut HashSet<(u64, u128)>,
-    c: &mut Collector,
-) {
+fn measure_file(e: &Entry, full: &[u16], volume: u64, sink: &mut impl Sink) {
     let placeholder = e.attributes
         & (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_OFFLINE)
         != 0;
@@ -408,28 +432,15 @@ fn measure_file(
 
     // Cloud placeholders and offline files count 0 and are never read.
     if placeholder {
-        c.totals.placeholders += 1;
+        sink.placeholder();
         // GUARD-BEGIN(placeholder-zero)
         on_disk = 0;
         // GUARD-END(placeholder-zero)
     }
 
-    if c.collect_large && on_disk >= DEDUP_THRESHOLD {
-        c.large.push(TopFile { path: display_path(full), bytes_on_disk: on_disk, logical_bytes: length, links });
-    }
-
-    // One count per file: a second name of a remembered file counts 0 bytes.
-    // GUARD-BEGIN(hardlink-dedup)
-    if on_disk >= DEDUP_THRESHOLD && !seen.insert((volume, e.file_id)) {
-        c.totals.hardlink_duplicates += 1;
-        on_disk = 0;
-    }
-    // GUARD-END(hardlink-dedup)
-
-    c.add_file(dir, on_disk, length);
-    if c.wants_top(on_disk) {
-        c.add_top(TopFile { path: display_path(full), bytes_on_disk: on_disk, logical_bytes: length, links });
-    }
+    // One count per file: the sink counts a second name of a remembered large file as 0
+    // bytes (`Collector::count_once`, the `hardlink-dedup` guard).
+    sink.file((volume, e.file_id), on_disk, length, links, || display_path(full));
 }
 
 /// The serial number of the volume a handle is on, so file IDs from different volumes never

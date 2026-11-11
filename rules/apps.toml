@@ -33,3 +33,27 @@ cost_pt_br = "O app quebra ou baixa tudo de novo."
 instructions = "In Claude: Settings > This computer > System > Storage, or Help > Troubleshooting > Clear Cache and Restart."
 instructions_pt_br = "No Claude: Configurações > Este computador > Sistema > Armazenamento, ou Ajuda > Solução de problemas > Limpar cache e reiniciar."
 last_verified = "2026-11-07"
+
+[[rule]]
+id = "edge-cache"
+title = "Microsoft Edge cache"
+title_pt_br = "Cache do Microsoft Edge"
+class = "regenerable-cache"
+action = "quarantine"
+paths = [
+  '%LOCALAPPDATA%\Microsoft\Edge\User Data\*\Cache',
+  '%LOCALAPPDATA%\Microsoft\Edge\User Data\*\Code Cache',
+  '%LOCALAPPDATA%\Microsoft\Edge\User Data\*\GPUCache',
+]
+evidence = "The HTTP, compiled-script and GPU shader caches of each Edge profile (Default, Profile 1, ...); Edge rebuilds them as pages are visited. Only these named cache folders: the rest of a profile (history, passwords, cookies) is browser profile data and is never touched."
+evidence_pt_br = "Os caches HTTP, de scripts compilados e de shaders de GPU de cada perfil do Edge (Default, Profile 1, ...); o Edge os reconstrói conforme as páginas são visitadas. Apenas estas pastas de cache nomeadas: o resto do perfil (histórico, senhas, cookies) é dado de perfil do navegador e nunca é tocado."
+source = "Microsoft Edge: Settings > Privacy, search, and services > Clear browsing data > Cached images and files (the same cache)."
+cost = "Pages and scripts load again once, a little slower."
+cost_pt_br = "As páginas e os scripts carregam de novo uma vez, um pouco mais devagar."
+instructions = "Edge: Settings > Privacy, search, and services > Clear browsing data > Cached images and files."
+instructions_pt_br = "Edge: Configurações > Privacidade, pesquisa e serviços > Limpar dados de navegação > Imagens e arquivos armazenados em cache."
+last_verified = "2026-11-11"
+
+[[rule.require]]
+kind = "process-not-running"
+names = ["msedge.exe"]

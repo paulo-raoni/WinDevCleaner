@@ -12,6 +12,8 @@ mod cloud;
 #[cfg(windows)]
 mod fixture;
 #[cfg(windows)]
+mod parallel;
+#[cfg(windows)]
 mod run;
 
 fn main() {

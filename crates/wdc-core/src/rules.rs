@@ -22,6 +22,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("vscode.toml", include_str!("../../../rules/vscode.toml")),
     ("nvidia.toml", include_str!("../../../rules/nvidia.toml")),
     ("apps.toml", include_str!("../../../rules/apps.toml")),
+    ("devtools.toml", include_str!("../../../rules/devtools.toml")),
 ];
 
 /// What kind of item a rule describes.

@@ -18,6 +18,9 @@ use wdc_core::quarantine::{self, Entry as QEntry};
 use wdc_core::scan::{Progress, ScanReport};
 use wdc_core::tools;
 
+/// Threads of a scan started with the "Scan faster" switch.
+pub const FASTER_JOBS: usize = wdc_core::scan::MAX_JOBS;
+
 /// Who started the scan in progress.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScanBy {
@@ -39,13 +42,14 @@ pub struct Loaded {
 }
 
 /// Which view the window shows. It follows the agent: its scan shows the tree, its `diff` the
-/// growth view, its `system_items` the system view.
+/// growth view, its `system_items` the system view, its `programs` the programs view.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum View {
     #[default]
     Space,
     Growth,
     System,
+    Programs,
     Explain,
     Plan,
     Quarantine,
@@ -76,6 +80,7 @@ pub struct Shared {
     /// The latest comparison with the previous scan of the same folders, or why there is none.
     pub diff: Option<Result<Arc<wdc_core::diff::Diff>, String>>,
     pub system: Option<Arc<Vec<wdc_core::system::SystemItem>>>,
+    pub programs: Option<Arc<wdc_core::programs::Report>>,
     pub explanation: Option<Arc<wdc_core::explain::Explanation>>,
     pub loaded: Option<Loaded>,
     pub scanning: Option<ScanProgress>,
@@ -367,8 +372,10 @@ impl AppCore {
         summary
     }
 
-    /// Starts a scan of the default read scope for the human (the Scan button).
-    pub fn start_human_scan(self: &Arc<Self>) {
+    /// Starts a scan of the default read scope for the human (the Scan button). With `faster`
+    /// (the "Scan faster" switch) the scan walks with [`FASTER_JOBS`] threads, each in
+    /// background mode, and returns the same report.
+    pub fn start_human_scan(self: &Arc<Self>, faster: bool) {
         if self.shared.lock().unwrap().scanning.is_some() {
             return;
         }
@@ -376,7 +383,10 @@ impl AppCore {
         std::thread::Builder::new()
             .name("scan".into())
             .spawn(move || {
-                if let Ok(args) = tools::parse_scan_args(&Value::Null) {
+                if let Ok(mut args) = tools::parse_scan_args(&Value::Null) {
+                    if faster {
+                        args.options.jobs = FASTER_JOBS;
+                    }
                     me.scan(ScanBy::Human, &args, None);
                 }
             })
@@ -392,6 +402,20 @@ impl AppCore {
                 let _background = wdc_core::background::ThreadBackground::enter();
                 let items = wdc_core::system::system_items();
                 me.shared.lock().unwrap().system = Some(Arc::new(items));
+                me.ctx.request_repaint();
+            })
+            .ok();
+    }
+
+    /// Reads the installed programs for the human (the button of the programs view).
+    pub fn start_programs(self: &Arc<Self>) {
+        let me = self.clone();
+        std::thread::Builder::new()
+            .name("programs".into())
+            .spawn(move || {
+                let _background = wdc_core::background::ThreadBackground::enter();
+                let (report, _) = tools::run_programs(&me.data_dir);
+                me.shared.lock().unwrap().programs = Some(Arc::new(report));
                 me.ctx.request_repaint();
             })
             .ok();
@@ -451,7 +475,7 @@ fn call_target(tool: &str, args: &Value) -> String {
     match tool {
         tools::SCAN => tools::parse_scan_args(args).map(|a| a.target).unwrap_or_default(),
         tools::TREE => args.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
-        tools::DIFF | tools::SYSTEM_ITEMS => String::new(),
+        tools::DIFF | tools::SYSTEM_ITEMS | tools::PROGRAMS => String::new(),
         tools::EXPLAIN => args.get("path").and_then(Value::as_str).unwrap_or_default().to_string(),
         tools::REQUEST_APPLY => args.get("plan").and_then(Value::as_str).unwrap_or_default().to_string(),
         _ => String::new(),
@@ -535,6 +559,18 @@ impl AgentHandler for AppCore {
                 self.ctx.request_repaint();
                 Ok(value)
             }
+            tools::PROGRAMS => {
+                let _background = wdc_core::background::ThreadBackground::enter();
+                let (report, value) = tools::run_programs(&self.data_dir);
+                {
+                    // The window shows the list the agent is reading.
+                    let mut s = self.shared.lock().unwrap();
+                    s.programs = Some(Arc::new(report));
+                    s.view = View::Programs;
+                }
+                self.ctx.request_repaint();
+                Ok(value)
+            }
             tools::EXPLAIN => {
                 let path = tools::parse_explain_args(args)?;
                 let _background = wdc_core::background::ThreadBackground::enter();
@@ -603,6 +639,8 @@ impl AgentHandler for AppCore {
                     wdc_core::fmt::bytes(bytes)
                 } else if let Some(bytes) = v.get("bytes_on_disk").and_then(Value::as_u64) {
                     wdc_core::fmt::bytes(bytes)
+                } else if let (Some(n), Some(left)) = (v.get("count").and_then(Value::as_u64), v.get("leftovers").and_then(Value::as_array)) {
+                    lang.fmt(Msg::AppActProgramsResult, &[("n", &n.to_string()), ("left", &left.len().to_string())])
                 } else {
                     String::new()
                 };
@@ -623,6 +661,12 @@ impl AgentHandler for AppCore {
                     Some(serde_json::json!({ "status": v["status"], "changed": v["changed"] }))
                 } else if v.get("total_bytes").is_some() {
                     Some(serde_json::json!({ "total_bytes": v["total_bytes"] }))
+                } else if v.get("leftovers").is_some() {
+                    Some(serde_json::json!({
+                        "count": v["count"],
+                        "reported_bytes_total": v["reported_bytes_total"],
+                        "leftovers": v["leftovers"].as_array().map(|a| a.len()).unwrap_or(0),
+                    }))
                 } else {
                     None
                 };

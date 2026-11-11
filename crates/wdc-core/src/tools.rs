@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 
 use serde_json::{json, Value};
 
-use crate::scan::{scan, Progress, ScanOptions, ScanReport};
+use crate::scan::{scan, Progress, ScanOptions, ScanReport, MAX_JOBS};
 use crate::scope;
 use crate::snapshot;
 
@@ -21,6 +21,7 @@ pub const SCAN: &str = "scan";
 pub const TREE: &str = "tree";
 pub const DIFF: &str = "diff";
 pub const SYSTEM_ITEMS: &str = "system_items";
+pub const PROGRAMS: &str = "programs";
 pub const EXPLAIN: &str = "explain";
 pub const PLAN: &str = "plan";
 pub const QUARANTINE: &str = "quarantine";
@@ -38,7 +39,10 @@ pub fn specs() -> Vec<ToolSpec> {
                 counted once even with several hard-link names, links (junctions, symbolic links) recorded and \
                 never followed, cloud files not stored locally counted 0 and never downloaded. Runs in Windows \
                 background mode. Saves a snapshot in the tool's own data folder; changes nothing else. When the \
-                WinDevCleaner app is open, the scan runs in the app and the user watches it there.",
+                WinDevCleaner app is open, the scan runs in the app and the user watches it there. `jobs` (1 to 4, \
+                default 1) walks with that many threads, each still in background mode: the same report, faster on \
+                a cold disk, but it competes more with what the person is doing. Use it only when the person is \
+                waiting for the result; leave it at 1 otherwise.",
             schema: || {
                 json!({
                     "type": "object",
@@ -48,7 +52,10 @@ pub fn specs() -> Vec<ToolSpec> {
                         "top": { "type": "integer", "minimum": 0, "maximum": 1000,
                                  "description": "How many of the largest files to return (default 50)." },
                         "depth": { "type": "integer", "minimum": 1, "maximum": 10,
-                                   "description": "Depth below each root for the largest folders list (default 3)." }
+                                   "description": "Depth below each root for the largest folders list (default 3)." },
+                        "jobs": { "type": "integer", "minimum": 1, "maximum": 4,
+                                  "description": "Worker threads (default 1). Use more only when the person is waiting; \
+                                                  the report is the same." }
                     },
                     "additionalProperties": false
                 })
@@ -111,6 +118,18 @@ pub fn specs() -> Vec<ToolSpec> {
             description: "Space Windows itself manages, read through Windows' own APIs: Recycle Bin, paging, swap and \
                 hibernation files, error reports, crash and memory dumps, System Restore. Always report-only; each \
                 item names the Windows setting or tool that manages it. When the app is open, the app shows them.",
+            schema: || json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        },
+        ToolSpec {
+            name: PROGRAMS,
+            description: "Installed programs from the per-user and per-machine uninstall registry keys: name, version, \
+                publisher, install date, scope and the size the installer reports (not a measured size), each with the \
+                program's own uninstall command for the person to run. Then the folders left behind by programs \
+                uninstalled since the last look, only those directly inside %APPDATA%, %LOCALAPPDATA% or \
+                %LOCALAPPDATA%\\Programs and named exactly like the program or its publisher (a publisher only when no \
+                installed program has it): `install-leftover` candidates a person must confirm, never actionable. \
+                Read-only: nothing is run, moved or written to the registry; the list is saved in the tool's data \
+                folder for the next look. Store apps are not included. When the app is open, the app shows it.",
             schema: || json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         },
         ToolSpec {
@@ -182,7 +201,7 @@ pub fn parse_scan_args(args: &Value) -> Result<ScanArgs, String> {
         _ => return Err("arguments must be an object".into()),
     };
     for k in obj.keys() {
-        if !["roots", "top", "depth"].contains(&k.as_str()) {
+        if !["roots", "top", "depth", "jobs"].contains(&k.as_str()) {
             return Err(format!("unknown argument `{k}`"));
         }
     }
@@ -211,6 +230,12 @@ pub fn parse_scan_args(args: &Value) -> Result<ScanArgs, String> {
     if let Some(v) = obj.get("top") {
         let n = v.as_u64().ok_or("`top` must be a non-negative integer")?;
         options.top_files = n.min(1000) as usize;
+    }
+    if let Some(v) = obj.get("jobs") {
+        options.jobs = v
+            .as_u64()
+            .filter(|n| (1..=MAX_JOBS as u64).contains(n))
+            .ok_or(format!("`jobs` must be an integer from 1 to {MAX_JOBS}"))? as usize;
     }
     let depth = match obj.get("depth") {
         Some(v) => v.as_u64().ok_or("`depth` must be a positive integer")?.clamp(1, 10) as u16,
@@ -305,6 +330,14 @@ pub fn run_diff(data_dir: &Path, opts: crate::diff::DiffOptions) -> Result<crate
 pub fn run_system_items() -> Value {
     let items = crate::system::system_items();
     json!({ "total_bytes": crate::system::total(&items), "items": items })
+}
+
+/// `programs`: installed programs and the folders their uninstalls left behind. Read-only; the
+/// list of this look is saved in the data folder for the next one.
+pub fn run_programs(data_dir: &Path) -> (crate::programs::Report, Value) {
+    let report = crate::programs::look(&crate::programs::default_sources(), data_dir, &crate::programs::leftover_roots());
+    let value = report.to_json();
+    (report, value)
 }
 
 /// Parsed arguments of `tree`.
@@ -431,6 +464,18 @@ mod tests {
         assert!(parse_scan_args(&json!({"roots": [1]})).is_err());
         let d = parse_scan_args(&Value::Null).unwrap();
         assert!(!d.options.roots.is_empty());
+        assert_eq!(d.options.jobs, 1, "one job unless asked");
+    }
+
+    #[test]
+    fn jobs_is_one_to_four() {
+        for n in 1..=4 {
+            assert_eq!(parse_scan_args(&json!({"roots": ["x"], "jobs": n})).unwrap().options.jobs, n);
+        }
+        for bad in [json!(0), json!(5), json!(9), json!(-1), json!("4"), json!(2.5), Value::Null] {
+            let e = parse_scan_args(&json!({"roots": ["x"], "jobs": bad})).unwrap_err();
+            assert!(e.contains("1 to 4"), "{bad}: {e}");
+        }
     }
 
     #[test]

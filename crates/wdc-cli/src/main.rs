@@ -47,6 +47,7 @@ fn main() -> ExitCode {
         Some("scan") => scan_command(&rest[1..], lang),
         Some("diff") => diff_command(&rest[1..], lang),
         Some("explain") => explain_command(&rest[1..], lang),
+        Some("programs") => programs_command(&rest[1..], lang),
         Some("plan") => change::plan_command(&rest[1..], lang),
         Some("apply") => change::apply_command(&rest[1..], lang),
         Some("quarantine") => change::quarantine_command(&rest[1..], lang),
@@ -86,12 +87,25 @@ fn scan_command(args: &[String], lang: Lang) -> ExitCode {
     let mut throttle = None;
     let mut top = None;
     let mut depth = 2u16;
+    let mut jobs = 1usize;
     let mut roots: Vec<PathBuf> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         let a = args[i].as_str();
         match a {
             "--json" => json = true,
+            "--jobs" => {
+                let value = args.get(i + 1);
+                match value.and_then(|v| v.parse::<usize>().ok()).filter(|n| (1..=wdc_core::scan::MAX_JOBS).contains(n)) {
+                    Some(n) => jobs = n,
+                    None => {
+                        let v = value.cloned().unwrap_or_default();
+                        eprintln!("{}", lang.fmt(Msg::CliJobsRange, &[("value", &v)]));
+                        return ExitCode::from(2);
+                    }
+                }
+                i += 1;
+            }
             "--throttle" | "--top" | "--depth" => {
                 let n = match parse_number(lang, a, args.get(i + 1)) {
                     Ok(n) => n,
@@ -128,6 +142,7 @@ fn scan_command(args: &[String], lang: Lang) -> ExitCode {
         }
     };
     scan_args.options.throttle = throttle;
+    scan_args.options.jobs = jobs;
     if let Some(t) = top {
         scan_args.options.top_files = t;
     }
@@ -284,6 +299,79 @@ fn print_system_items(lang: Lang, items: &[serde_json::Value]) {
         let path = it["path"].as_str().map(|p| format!("  {p}")).unwrap_or_default();
         println!("  {:>10}  {}{path}", size, lang.t(kind.name()));
         println!("              {}", lang.t(kind.managed_by()));
+    }
+}
+
+fn programs_command(args: &[String], lang: Lang) -> ExitCode {
+    let mut json = false;
+    for a in args {
+        match a.as_str() {
+            "--json" => json = true,
+            other => {
+                eprintln!("{}", lang.fmt(Msg::CliUnknownCommand, &[("arg", other)]));
+                return ExitCode::from(1);
+            }
+        }
+    }
+    wdc_core::background::enter_process_background_mode();
+    let (report, value) = wdc_core::tools::run_programs(&wdc_core::scope::data_dir());
+    if json {
+        println!("{}", serde_json::to_string_pretty(&value).unwrap());
+    } else {
+        print_programs(lang, &report);
+    }
+    ExitCode::SUCCESS
+}
+
+fn print_programs(lang: Lang, report: &wdc_core::programs::Report) {
+    use wdc_core::programs::Scope;
+    println!("{}", lang.fmt(Msg::CliProgramsHeader, &[("n", &fmt::count(report.programs.len() as u64))]));
+    if report.programs.is_empty() {
+        println!("{}", lang.t(Msg::CliProgramsNone));
+    }
+    for p in &report.programs {
+        let size = p.reported_size_bytes.map(fmt::bytes).unwrap_or_else(|| lang.t(Msg::CliProgramsNoSize).to_string());
+        let scope = lang.t(match p.scope {
+            Scope::User => Msg::ProgScopeUser,
+            Scope::Machine => Msg::ProgScopeMachine,
+        });
+        let mut line = format!("  {:>10}  {}", size, p.name);
+        if let Some(v) = &p.version {
+            line.push_str(&format!("  {v}"));
+        }
+        if let Some(publisher) = &p.publisher {
+            line.push_str(&format!("  ({publisher})"));
+        }
+        if let Some(d) = &p.install_date {
+            line.push_str(&format!("  {d}"));
+        }
+        line.push_str(&format!("  [{scope}]"));
+        println!("{line}");
+        match &p.uninstall_command {
+            Some(c) => println!("              {}", lang.fmt(Msg::CliProgramsUninstall, &[("command", c)])),
+            None => println!("              {}", lang.t(Msg::CliProgramsNoCommand)),
+        }
+        if let Some(c) = &p.quiet_uninstall_command {
+            println!("              {}", lang.fmt(Msg::CliProgramsQuiet, &[("command", c)]));
+        }
+    }
+    println!();
+    for e in &report.errors {
+        eprintln!("{}", lang.fmt(Msg::CliProgramsReadError, &[("error", e)]));
+    }
+    if report.first_look {
+        println!("{}", lang.t(Msg::CliProgramsFirstLook));
+    } else if report.leftovers_checked {
+        if report.leftovers.is_empty() {
+            println!("{}", lang.t(Msg::CliProgramsLeftoversNone));
+        } else {
+            println!("{}", lang.t(Msg::CliProgramsLeftoversHeader));
+            for l in &report.leftovers {
+                println!("  {}", l.folder);
+                println!("      {}", l.why(lang));
+                println!("      {}", lang.fmt(Msg::ProgLeftoverNote, &[("explain", &l.explain)]));
+            }
+        }
     }
 }
 

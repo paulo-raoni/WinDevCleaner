@@ -94,14 +94,17 @@ macro_rules! messages {
 messages! {
     // Command line.
     CliUsage =>
-        "WinDevCleaner {version}: find where your disk space is, and clean it safely.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc explain PATH [--json]\n      Why a folder or file is here, the rule that knows it, and what deleting it would free.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc plan [PATH ...] [--class CLASS] [--rule ID] [-o FILE] [--json]\n      Drafts a plan of what may move to quarantine now, each item explained. Changes nothing.\n  wdc plan show FILE [--json]\n  wdc apply --plan FILE [--purge-now] [--json]\n      Moves the plan's items to quarantine after re-checking each one. Needs proof that\n      you are here (Windows Hello, or a code shown in a desktop dialog).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Deletes quarantined items older than 7 days; --now also younger caches and install\n      leftovers. Restore and purge need the same proof.\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless. Agents can never apply by themselves.\n  wdc --version\n",
-        "WinDevCleaner {version}: descubra onde está o espaço do seu disco, e limpe com segurança.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc explain CAMINHO [--json]\n      Por que uma pasta ou arquivo está aqui, a regra que o conhece, e o que apagar liberaria.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc plan [CAMINHO ...] [--class CLASSE] [--rule ID] [-o ARQUIVO] [--json]\n      Monta um plano do que pode ir para a quarentena agora, cada item explicado. Não altera nada.\n  wdc plan show ARQUIVO [--json]\n  wdc apply --plan ARQUIVO [--purge-now] [--json]\n      Move os itens do plano para a quarentena depois de checar cada um de novo. Precisa de\n      prova de que você está aqui (Windows Hello, ou um código numa janela da área de trabalho).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Apaga itens da quarentena com mais de 7 dias; --now também caches e sobras de instalação\n      mais novos. Restaurar e apagar precisam da mesma prova.\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela. Agentes nunca aplicam sozinhos.\n  wdc --version\n";
+        "WinDevCleaner {version}: find where your disk space is, and clean it safely.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--jobs N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      --jobs N (1 to 4, default 1) walks with N threads, each in background mode: the same\n      report, faster on a cold disk, when you are waiting for it.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc explain PATH [--json]\n      Why a folder or file is here, the rule that knows it, and what deleting it would free.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc plan [PATH ...] [--class CLASS] [--rule ID] [-o FILE] [--json]\n      Drafts a plan of what may move to quarantine now, each item explained. Changes nothing.\n  wdc plan show FILE [--json]\n  wdc apply --plan FILE [--purge-now] [--json]\n      Moves the plan's items to quarantine after re-checking each one. Needs proof that\n      you are here (Windows Hello, or a code shown in a desktop dialog).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Deletes quarantined items older than 7 days; --now also younger caches and install\n      leftovers. Restore and purge need the same proof.\n  wdc programs [--json]\n      Installed programs with the size each installer reports and its own uninstall command\n      (never run by this tool), then the folders left behind by programs uninstalled since the\n      last look. Read-only.\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless. Agents can never apply by themselves.\n  wdc --version\n",
+        "WinDevCleaner {version}: descubra onde está o espaço do seu disco, e limpe com segurança.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--jobs N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      --jobs N (1 a 4, padrão 1) percorre com N threads, cada uma em modo em segundo plano: o\n      mesmo relatório, mais rápido num disco frio, quando você está esperando por ele.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc explain CAMINHO [--json]\n      Por que uma pasta ou arquivo está aqui, a regra que o conhece, e o que apagar liberaria.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc plan [CAMINHO ...] [--class CLASSE] [--rule ID] [-o ARQUIVO] [--json]\n      Monta um plano do que pode ir para a quarentena agora, cada item explicado. Não altera nada.\n  wdc plan show ARQUIVO [--json]\n  wdc apply --plan ARQUIVO [--purge-now] [--json]\n      Move os itens do plano para a quarentena depois de checar cada um de novo. Precisa de\n      prova de que você está aqui (Windows Hello, ou um código numa janela da área de trabalho).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Apaga itens da quarentena com mais de 7 dias; --now também caches e sobras de instalação\n      mais novos. Restaurar e apagar precisam da mesma prova.\n  wdc programs [--json]\n      Programas instalados com o tamanho que cada instalador informa e o seu comando de\n      desinstalação (nunca executado por esta ferramenta), e as pastas deixadas por programas\n      desinstalados desde a última consulta. Só leitura.\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela. Agentes nunca aplicam sozinhos.\n  wdc --version\n";
     CliUnknownCommand =>
         "Unknown command or option: {arg}. Run `wdc --help`.",
         "Comando ou opção desconhecida: {arg}. Rode `wdc --help`.";
     CliBadValue =>
         "Invalid value for {option}: {value}.",
         "Valor inválido para {option}: {value}.";
+    CliJobsRange =>
+        "--jobs takes a whole number from 1 to 4 (got: {value}).",
+        "--jobs aceita um número inteiro de 1 a 4 (recebido: {value}).";
     CliScanStarting =>
         "Scanning {roots} in background mode...",
         "Analisando {roots} em modo de segundo plano...";
@@ -152,6 +155,12 @@ messages! {
     AppScan =>
         "Scan",
         "Analisar";
+    AppScanFaster =>
+        "Scan faster",
+        "Analisar mais rápido";
+    AppScanFasterHint =>
+        "Uses 4 threads, still in background mode. Same result, quicker on a cold disk, but it competes more with your other work.",
+        "Usa 4 threads, ainda em modo em segundo plano. Mesmo resultado, mais rápido num disco frio, mas disputa mais com o seu outro trabalho.";
     AppScanning =>
         "Scanning in background mode... {files} files, {size}",
         "Analisando em segundo plano... {files} arquivos, {size}";
@@ -826,6 +835,77 @@ messages! {
     ApplyQuarantineUnsafe =>
         "the quarantine folder is not safe to use ({detail})",
         "a pasta de quarentena não é segura para usar ({detail})";
+
+    // Programs (slice 7).
+    ProgSizeNote =>
+        "Sizes are what each installer reports (EstimatedSize in the registry), not a measured size.",
+        "Os tamanhos são os que cada instalador informa (EstimatedSize no registro), não um tamanho medido.";
+    ProgReadOnlyNote =>
+        "Read-only: WinDevCleaner never runs an uninstall command and changes nothing. The commands are for the person to run.",
+        "Só leitura: o WinDevCleaner nunca executa um comando de desinstalação e não altera nada. Os comandos são para a pessoa executar.";
+    ProgWhyName =>
+        "Named exactly like the program {program}, which is no longer installed.",
+        "Tem exatamente o nome do programa {program}, que não está mais instalado.";
+    ProgWhyPublisher =>
+        "Named exactly like the publisher {publisher} of {program}, which is no longer installed, and no installed program has that publisher.",
+        "Tem exatamente o nome do fabricante {publisher} de {program}, que não está mais instalado, e nenhum programa instalado é desse fabricante.";
+    ProgLeftoverNote =>
+        "Candidate only (install leftover): a person must confirm it before anything is done. Run {explain} to see what it is. The tool never removes it.",
+        "Apenas candidata (sobra de instalação): uma pessoa precisa confirmar antes de qualquer ação. Rode {explain} para ver o que é. A ferramenta nunca a remove.";
+    ProgScopeUser =>
+        "this user",
+        "este usuário";
+    ProgScopeMachine =>
+        "all users",
+        "todos os usuários";
+    CliProgramsHeader =>
+        "Installed programs ({n}). The size is what each installer reports, not a measured size. WinDevCleaner never runs an uninstall command: copy one into your own terminal if you want it.",
+        "Programas instalados ({n}). O tamanho é o que cada instalador informa, não um tamanho medido. O WinDevCleaner nunca executa um comando de desinstalação: copie um para o seu próprio terminal se quiser.";
+    CliProgramsNone =>
+        "No installed programs were found in the uninstall registry keys.",
+        "Nenhum programa instalado foi encontrado nas chaves de desinstalação do registro.";
+    CliProgramsNoSize =>
+        "no size reported",
+        "sem tamanho informado";
+    CliProgramsNoCommand =>
+        "no uninstall command recorded",
+        "nenhum comando de desinstalação registrado";
+    CliProgramsUninstall =>
+        "uninstall: {command}",
+        "desinstalar: {command}";
+    CliProgramsQuiet =>
+        "quiet uninstall: {command}",
+        "desinstalar em silêncio: {command}";
+    CliProgramsReadError =>
+        "Could not read part of the registry: {error}. Folders left behind were not compared this time.",
+        "Não foi possível ler parte do registro: {error}. As pastas deixadas para trás não foram comparadas desta vez.";
+    CliProgramsLeftoversHeader =>
+        "Folders left behind by programs uninstalled since the last look (candidates only; a person must confirm each):",
+        "Pastas deixadas por programas desinstalados desde a última consulta (só candidatas; uma pessoa precisa confirmar cada uma):";
+    CliProgramsLeftoversNone =>
+        "No program was uninstalled since the last look that left a folder named exactly like it or its publisher.",
+        "Nenhum programa desinstalado desde a última consulta deixou uma pasta com exatamente o seu nome ou o do fabricante.";
+    CliProgramsFirstLook =>
+        "This is the first look: the list was saved. Run it again after an uninstall to see what the program left behind.",
+        "Esta é a primeira consulta: a lista foi salva. Rode de novo depois de uma desinstalação para ver o que o programa deixou.";
+    AppProgramsQuietLabel =>
+        "quiet uninstall:",
+        "desinstalar em silêncio:";
+    AppTabPrograms =>
+        "Programs",
+        "Programas";
+    AppReadPrograms =>
+        "Read installed programs",
+        "Ler programas instalados";
+    AppProgramsNotRead =>
+        "Installed programs have not been read yet. This is read-only: the app never runs an uninstall command.",
+        "Os programas instalados ainda não foram lidos. É só leitura: o app nunca executa um comando de desinstalação.";
+    AppActPrograms =>
+        "reading installed programs",
+        "lendo programas instalados";
+    AppActProgramsResult =>
+        "{n} programs, {left} leftover candidates",
+        "{n} programas, {left} pastas candidatas";
 }
 
 
