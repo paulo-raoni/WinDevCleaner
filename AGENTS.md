@@ -43,7 +43,8 @@ the system: every turn, notification and CI event re-reads all of it. So:
   only when neither decides it (canon O-08).
 - The session hands off and the owner starts a new one at a natural boundary, a slice merged,
   instead of carrying days of transcript into every event (canon C-71). The handoff is
-  `SESSION_HANDOFF.md` at the root, kept out of git by `.git/info/exclude`.
+  `.omc/SESSION_HANDOFF.md` (the owner's habit: `/clear` plus a handoff in `.omc/`), kept out of git
+  by `/.omc/` in `.git/info/exclude`.
 
 ## 2 · The two-file contract
 
