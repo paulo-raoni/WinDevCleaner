@@ -34,6 +34,8 @@ rmcp = { version = "=3.9.0", default-features = false, features = ["server", "tr
 tokio = { version = "1", default-features = false, features = ["rt", "macros", "io-std", "sync"] }
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "default_fonts", "wgpu_no_default_features"] }
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "dx12"] }
+# Embeds the icon as a Windows resource; a build dependency of the two executables, Windows hosts only.
+winresource = { version = "0.1", default-features = false }
 
 [profile.release]
 opt-level = 3

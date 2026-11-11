@@ -23,3 +23,8 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 wdc-testkit.workspace = true
+
+# Embeds assets/windevcleaner.ico as the executable's icon. Built only on a Windows host: on
+# Linux the build script does nothing.
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

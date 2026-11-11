@@ -28,3 +28,8 @@ wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "v
 
 [dev-dependencies]
 wdc-testkit.workspace = true
+
+# Embeds assets/windevcleaner.ico as the executable's icon. Built only on a Windows host: on
+# Linux the build script does nothing.
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

@@ -23,6 +23,10 @@
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of WinDevCleaner is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- The icon of the Start menu shortcut and of Settings > Apps. -->
+    <Icon Id="AppIcon.ico" SourceFile="$(sys.SOURCEFILEDIR)..\assets\windevcleaner.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="ProgramsDir" Name="Programs">
         <Directory Id="INSTALLFOLDER" Name="WinDevCleaner" />
@@ -44,7 +48,7 @@
       </Component>
       <Component Id="StartMenu" Directory="ProgramMenuFolder" Guid="9B0F4C36-3E2B-4E6A-8F0E-0C4B9A1D2E03">
         <Shortcut Id="AppShortcut" Name="WinDevCleaner" Description="Find where your disk space is"
-                  Target="[INSTALLFOLDER]WinDevCleaner.exe" WorkingDirectory="INSTALLFOLDER" />
+                  Target="[INSTALLFOLDER]WinDevCleaner.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
         <RegistryValue Root="HKCU" Key="Software\WinDevCleaner" Name="shortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </Feature>
