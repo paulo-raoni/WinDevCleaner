@@ -3,8 +3,15 @@ name: release
 # A tag `vX.Y.Z` (or `vX.Y.Z-pre.N`, published as a pre-release) builds the release on the free
 # windows-latest runner and publishes a GitHub Release with the MSI, a zip of both executables and
 # SHA256SUMS.txt. A pull request that changes this file or the installer runs the same build as a
-# dry run: everything but the publish, with the files uploaded as an artifact.
+# dry run: everything but the publish, with the files uploaded as an artifact. Started by hand
+# (workflow_dispatch) on `main` with a tag name, it creates that tag on the commit it built and
+# publishes the release: the way to release from a session that may push only its own branch.
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create and publish, e.g. v1.0.0-rc.1 (must equal v + the Cargo.toml version)"
+        required: true
   push:
     tags: ["v*"]
   pull_request:
@@ -33,15 +40,18 @@ jobs:
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - name: Version from Cargo.toml, checked against the tag
         shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           # An MSI version is numbers only: 1.0.0-rc.1 installs as 1.0.0 (the installer allows a
           # same-version upgrade, so 1.0.0 replaces it).
           $msiVersion = $version -replace '[-+].*$', ''
           if ($msiVersion -notmatch '^\d+\.\d+\.\d+$') { throw "MSI version '$msiVersion' from '$version' is not numeric" }
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match the Cargo.toml version v$version"
-          }
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:INPUT_TAG } elseif ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { '' }
+          if ($tag -and $tag -ne "v$version") { throw "Tag $tag does not match the Cargo.toml version v$version" }
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $env:GITHUB_REF_NAME -ne 'main') { throw "Release by hand only from main, not $env:GITHUB_REF_NAME" }
+          "WDC_TAG=$tag" >> $env:GITHUB_ENV
           $pre = if ($version -match '-') { 'true' } else { 'false' }
           "WDC_VERSION=$version" >> $env:GITHUB_ENV
           "WDC_MSI_VERSION=$msiVersion" >> $env:GITHUB_ENV
@@ -73,12 +83,14 @@ jobs:
           name: release-dist
           path: dist
       - name: Publish the GitHub Release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $flags = @('--title', "WinDevCleaner $env:GITHUB_REF_NAME", '--verify-tag', '--generate-notes',
+          # A pushed tag already exists; started by hand, gh creates the tag on the commit built here.
+          $where = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { @('--target', $env:GITHUB_SHA) } else { @('--verify-tag') }
+          $flags = @('--title', "WinDevCleaner $env:WDC_TAG") + $where + @('--generate-notes',
                      '--notes', 'What changed is in CHANGELOG.md. Check a download with Get-FileHash against SHA256SUMS.txt.')
           if ($env:WDC_PRERELEASE -eq 'true') { $flags += '--prerelease' } else { $flags += '--latest' }
-          gh release create $env:GITHUB_REF_NAME (Get-ChildItem dist -File).FullName @flags
+          gh release create $env:WDC_TAG (Get-ChildItem dist -File).FullName @flags
