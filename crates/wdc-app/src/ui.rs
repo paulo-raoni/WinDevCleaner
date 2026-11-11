@@ -489,10 +489,9 @@ fn programs_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
             } else {
                 ui.label(RichText::new(lang.t(Msg::CliProgramsLeftoversHeader)).strong());
                 for l in &report.leftovers {
-                    let field = lang.t(l.matched.text());
                     ui.add(egui::Label::new(RichText::new(&l.folder).monospace()).selectable(true));
                     ui.label(
-                        RichText::new(lang.fmt(Msg::CliProgramsLeftoverWhy, &[("field", field), ("program", &l.program)])).weak(),
+                        RichText::new(l.why(lang)).weak(),
                     );
                     ui.label(RichText::new(lang.fmt(Msg::ProgLeftoverNote, &[("explain", &l.explain)])).weak());
                     ui.add_space(4.0);

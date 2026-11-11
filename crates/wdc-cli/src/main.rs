@@ -353,9 +353,8 @@ fn print_programs(lang: Lang, report: &wdc_core::programs::Report) {
         } else {
             println!("{}", lang.t(Msg::CliProgramsLeftoversHeader));
             for l in &report.leftovers {
-                let field = lang.t(l.matched.text());
                 println!("  {}", l.folder);
-                println!("      {}", lang.fmt(Msg::CliProgramsLeftoverWhy, &[("field", field), ("program", &l.program)]));
+                println!("      {}", l.why(lang));
                 println!("      {}", lang.fmt(Msg::ProgLeftoverNote, &[("explain", &l.explain)]));
             }
         }

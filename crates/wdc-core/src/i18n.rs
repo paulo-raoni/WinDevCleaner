@@ -834,12 +834,12 @@ messages! {
     ProgReadOnlyNote =>
         "Read-only: WinDevCleaner never runs an uninstall command and changes nothing. The commands are for the person to run.",
         "Só leitura: o WinDevCleaner nunca executa um comando de desinstalação e não altera nada. Os comandos são para a pessoa executar.";
-    ProgFieldName =>
-        "the program's name",
-        "o nome do programa";
-    ProgFieldPublisher =>
-        "the program's publisher",
-        "o fabricante do programa";
+    ProgWhyName =>
+        "Named exactly like the program {program}, which is no longer installed.",
+        "Tem exatamente o nome do programa {program}, que não está mais instalado.";
+    ProgWhyPublisher =>
+        "Named exactly like the publisher {publisher} of {program}, which is no longer installed, and no installed program has that publisher.",
+        "Tem exatamente o nome do fabricante {publisher} de {program}, que não está mais instalado, e nenhum programa instalado é desse fabricante.";
     ProgLeftoverNote =>
         "Candidate only (install leftover): a person must confirm it before anything is done. Run {explain} to see what it is. The tool never removes it.",
         "Apenas candidata (sobra de instalação): uma pessoa precisa confirmar antes de qualquer ação. Rode {explain} para ver o que é. A ferramenta nunca a remove.";
@@ -879,9 +879,6 @@ messages! {
     CliProgramsFirstLook =>
         "This is the first look: the list was saved. Run it again after an uninstall to see what the program left behind.",
         "Esta é a primeira consulta: a lista foi salva. Rode de novo depois de uma desinstalação para ver o que o programa deixou.";
-    CliProgramsLeftoverWhy =>
-        "named like {field} of {program}",
-        "com o nome de {field} de {program}";
     AppProgramsQuietLabel =>
         "quiet uninstall:",
         "desinstalar em silêncio:";

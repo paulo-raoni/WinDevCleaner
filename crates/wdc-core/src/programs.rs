@@ -497,9 +497,16 @@ pub enum Field {
 impl Field {
     pub fn text(self) -> Msg {
         match self {
-            Field::Name => Msg::ProgFieldName,
-            Field::Publisher => Msg::ProgFieldPublisher,
+            Field::Name => Msg::ProgWhyName,
+            Field::Publisher => Msg::ProgWhyPublisher,
         }
+    }
+}
+
+impl Leftover {
+    /// Why the folder is a candidate, in the given language.
+    pub fn why(&self, lang: Lang) -> String {
+        lang.fmt(self.matched.text(), &[("program", &self.program), ("publisher", self.publisher.as_deref().unwrap_or(""))])
     }
 }
 
@@ -526,6 +533,16 @@ pub fn explain_command(folder: &str) -> String {
     format!("wdc explain \"{folder}\"")
 }
 
+/// True when no program installed now has this name (ignoring case).
+#[allow(unused_mut, unused_assignments)]
+fn name_is_free(name: &str, current: &[Remembered]) -> bool {
+    let mut free = true;
+    // GUARD-BEGIN(leftover-name-installed)
+    free = !current.iter().any(|c| same_text(&c.name, name));
+    // GUARD-END(leftover-name-installed)
+    free
+}
+
 /// Folders left by programs in `previous` and absent from `current`.
 pub fn leftovers(previous: &[Remembered], current: &[Remembered], children: &[Child]) -> Vec<Leftover> {
     let mut out: Vec<Leftover> = Vec::new();
@@ -542,7 +559,7 @@ pub fn leftovers(previous: &[Remembered], current: &[Remembered], children: &[Ch
             continue;
         }
         for child in children {
-            let matched = if name_equals(&child.name, &gone.name) {
+            let matched = if name_equals(&child.name, &gone.name) && name_is_free(&gone.name, current) {
                 Some(Field::Name)
             } else if gone.publisher.as_deref().is_some_and(|p| name_equals(&child.name, p) && publisher_is_free(p, current)) {
                 Some(Field::Publisher)

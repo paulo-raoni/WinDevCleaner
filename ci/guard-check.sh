@@ -69,6 +69,7 @@ CASES=(
   "presence-code|wdc-cli|apply_cli|apply_with_the_desktop_code_then_restore_gives_the_identical_tree"
   "leftover-exact|wdc-core|programs|a_folder_named_exactly_like_the_program_is_reported_and_a_longer_or_shorter_name_is_not"
   "leftover-publisher|wdc-core|programs|a_publisher_folder_is_not_reported_while_another_program_has_that_publisher"
+  "leftover-name-installed|wdc-core|programs|a_renamed_publisher_does_not_make_an_installed_program_leave_a_folder"
 )
 
 run_test() { # package target name log

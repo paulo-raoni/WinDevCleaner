@@ -202,6 +202,17 @@ fn a_publisher_folder_is_not_reported_while_another_program_has_that_publisher()
 }
 
 #[test]
+fn a_renamed_publisher_does_not_make_an_installed_program_leave_a_folder() {
+    let previous = vec![rem("Foo", Some("Acme"))];
+    let current = vec![rem("Foo", Some("Acme Inc."))];
+    let children = vec![child("Foo")];
+    let found = leftovers(&previous, &current, &children);
+    let reported_name = found.iter().any(|l| l.matched == Field::Name);
+    guard_assert!("leftover-name-installed", !reported_name, "Foo is still installed under another publisher but its folder was reported: {found:?}");
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
 fn a_program_in_both_lists_produces_no_leftover() {
     let both = vec![rem("Foo", Some("Acme")), rem("Bar", None)];
     let children = vec![child("Foo"), child("Acme"), child("Bar")];
