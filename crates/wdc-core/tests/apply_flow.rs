@@ -374,6 +374,14 @@ fn builder(rule_id: &str) -> Option<Builder> {
         "cpptools-ipch" => |b| cache_folder(local(b).join("Microsoft").join("vscode-cpptools").join("ipch")),
         "nvidia-shader-caches" => |b| cache_folder(local(b).join("NVIDIA").join("DXCache")),
         "steam-htmlcache" => |b| cache_folder(local(b).join("Steam").join("htmlcache")),
+        "edge-cache" => |b| cache_folder(local(b).join("Microsoft").join("Edge").join("User Data").join("Profile 3").join("Cache")),
+        "pip-cache" => |b| {
+            let package = local(b).join("Packages").join("PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0");
+            cache_folder(package.join("LocalCache").join("Local").join("pip").join("Cache"))
+        },
+        "uv-cache" => |b| cache_folder(local(b).join("uv").join("cache")),
+        "playwright-browsers" => |b| cache_folder(local(b).join("ms-playwright").join("chromium-1148")),
+        "temp-old" => |b| cache_folder(local(b).join("Temp").join("old-build-output")),
         _ => return None,
     })
 }
@@ -552,7 +560,11 @@ fn a_condition_that_became_false_skips_the_item_for_every_quarantine_rule() {
                     std::fs::write(&path, format!(r#"[{{"identifier":{{"id":"x"}},"version":"1","relativeLocation":"{name}"}}]"#)).unwrap();
                     ("referenced by extensions.json".to_string(), ctx_with(&f, &[]))
                 }
-                // An age cannot be made to shrink after planning.
+                // The clock is the real one again: the item, created moments ago, is too new.
+                Condition::OlderThan { days } => {
+                    let env = ctx_for(&f.base).env;
+                    (format!("younger than {days} days"), Context::new(env, Some(Default::default()), None))
+                }
                 _ => continue,
             };
             tried += 1;

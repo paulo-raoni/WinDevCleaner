@@ -442,3 +442,97 @@ fn the_cowork_case_two_names_one_outside_expected_freed_zero() {
     assert_eq!(e.expected_freed_bytes, e.bytes_on_disk);
     wdc_testkit::remove_tree(&f.base);
 }
+
+/// The rule id, item, actionable flag and reasons of `path`, through `explain`.
+fn item_rule(f: &Fixture, path: &Path, running: &[&str]) -> (Option<String>, String, bool, Vec<WhyNot>) {
+    let e = explain(&s(path), &RuleSet::built_in(), &f.ctx(running, None), None);
+    (e.rule.as_ref().map(|r| r.id.clone()), e.item.clone(), e.actionable, e.why_not.clone())
+}
+
+#[test]
+fn edge_cache_is_each_profiles_named_cache_folders_only() {
+    let f = Fixture::new("rule-edge");
+    let data = f.local.join("Microsoft").join("Edge").join("User Data");
+    for sub in ["Cache", "Code Cache", "GPUCache"] {
+        write(&data.join("Profile 3").join(sub).join("data_1"), MIB);
+        let (id, item, actionable, why) = item_rule(&f, &data.join("Profile 3").join(sub).join("data_1"), &[]);
+        assert_eq!(id.as_deref(), Some("edge-cache"), "{sub}");
+        assert!(item.ends_with(sub), "{item}");
+        assert!(actionable, "{sub}: {why:?}");
+        assert!(!item_rule(&f, &data.join("Profile 3").join(sub), &["msedge.exe"]).2, "{sub}: Edge running");
+    }
+    // The profile folder and its parents are not items; History next to Cache is forbidden.
+    let history = data.join("Profile 3").join("History");
+    write(&history, MIB);
+    let (id, _, actionable, why) = item_rule(&f, &history, &[]);
+    assert_ne!(id.as_deref(), Some("edge-cache"));
+    assert!(!actionable);
+    assert!(why.iter().any(|w| matches!(w, WhyNot::Forbidden { forbid: wdc_core::act::Forbid::BrowserProfile })), "{why:?}");
+    let (id, _, actionable, _) = item_rule(&f, &data.join("Profile 3"), &[]);
+    assert!(id.as_deref() != Some("edge-cache") && !actionable);
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn pip_uv_and_playwright_match_their_item_and_not_the_parent_or_a_sibling() {
+    let f = Fixture::new("rule-devtools");
+    let store = f.local.join("Packages").join("PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0").join("LocalCache").join("Local").join("pip");
+    for (cache, rule, process) in [
+        (f.local.join("pip").join("Cache"), "pip-cache", "pip3.exe"),
+        (store.join("Cache"), "pip-cache", "pip.exe"),
+        (f.local.join("uv").join("cache"), "uv-cache", "uvx.exe"),
+        (f.local.join("ms-playwright").join("firefox-1471"), "playwright-browsers", ""),
+    ] {
+        write(&cache.join("x").join("f.bin"), MIB);
+        let (id, item, actionable, why) = item_rule(&f, &cache.join("x").join("f.bin"), &[]);
+        assert_eq!(id.as_deref(), Some(rule), "{cache:?}");
+        assert_eq!(item, s(&cache));
+        assert!(actionable, "{rule}: {why:?}");
+        if !process.is_empty() {
+            assert!(!item_rule(&f, &cache, &[process]).2, "{rule}: {process} running");
+        }
+        // The parent folder is not an item of the rule.
+        let parent = cache.parent().unwrap();
+        assert_ne!(item_rule(&f, parent, &[]).0.as_deref(), Some(rule), "{parent:?}");
+    }
+    // A sibling of the cache folder is not an item.
+    write(&f.local.join("pip").join("http").join("x"), 10);
+    write(&store.join("selfcheck.json"), 10);
+    write(&f.local.join("uv").join("python").join("x"), 10);
+    for sibling in [f.local.join("pip").join("http"), store.join("selfcheck.json"), f.local.join("uv").join("python")] {
+        let id = item_rule(&f, &sibling, &[]).0;
+        assert!(!matches!(id.as_deref(), Some("pip-cache" | "uv-cache")), "{sibling:?}: {id:?}");
+    }
+    // The ms-playwright folder itself is not an item; each build below it is.
+    assert_ne!(item_rule(&f, &f.local.join("ms-playwright"), &[]).0.as_deref(), Some("playwright-browsers"));
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn temp_old_needs_seven_days_and_the_temp_folder_is_never_an_item() {
+    let f = Fixture::new("rule-temp");
+    let temp = f.local.join("Temp");
+    let child = temp.join("build-123");
+    write(&child.join("out.o"), MIB);
+    let rules = RuleSet::built_in();
+
+    // Newer than 7 days (just created): matched, not actionable because of the age.
+    let e = explain(&s(&child.join("out.o")), &rules, &f.ctx(&[], None), None);
+    assert_eq!(e.rule.as_ref().map(|r| r.id.as_str()), Some("temp-old"));
+    assert!(e.item.ends_with("build-123"), "{}", e.item);
+    assert!(!e.actionable, "a fresh temp child is not actionable");
+    assert!(e.why_not.iter().any(|w| matches!(w, WhyNot::ConditionNotMet { .. })), "{:?}", e.why_not);
+
+    // Older: the clock 8 days ahead.
+    let mut ctx = f.ctx(&[], None);
+    ctx.now = SystemTime::now() + Duration::from_secs(8 * 86_400);
+    let e = explain(&s(&child), &rules, &ctx, None);
+    assert_eq!(e.rule.as_ref().map(|r| r.id.as_str()), Some("temp-old"));
+    assert!(e.actionable, "{:?}", e.why_not);
+
+    // The temp folder itself is never an item of the rule, however old.
+    let e = explain(&s(&temp), &rules, &ctx, None);
+    assert_ne!(e.rule.as_ref().map(|r| r.id.as_str()), Some("temp-old"));
+    assert!(!e.actionable);
+    wdc_testkit::remove_tree(&f.base);
+}
