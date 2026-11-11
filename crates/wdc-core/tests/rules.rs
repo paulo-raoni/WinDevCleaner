@@ -523,6 +523,14 @@ fn temp_old_needs_seven_days_and_the_temp_folder_is_never_an_item() {
     assert!(!e.actionable, "a fresh temp child is not actionable");
     assert!(e.why_not.iter().any(|w| matches!(w, WhyNot::ConditionNotMet { .. })), "{:?}", e.why_not);
 
+    // Not yet 7 days old: the clock 6 days ahead is still not actionable.
+    let mut ctx6 = f.ctx(&[], None);
+    ctx6.now = SystemTime::now() + Duration::from_secs(6 * 86_400);
+    let e = explain(&s(&child), &rules, &ctx6, None);
+    assert_eq!(e.rule.as_ref().map(|r| r.id.as_str()), Some("temp-old"));
+    assert!(!e.actionable, "6 days is below the 7-day threshold");
+    assert!(e.why_not.iter().any(|w| matches!(w, WhyNot::ConditionNotMet { .. })), "{:?}", e.why_not);
+
     // Older: the clock 8 days ahead.
     let mut ctx = f.ctx(&[], None);
     ctx.now = SystemTime::now() + Duration::from_secs(8 * 86_400);

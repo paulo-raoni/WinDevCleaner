@@ -31,16 +31,21 @@ wdc scan C:\Users\me\.vscode     # specific folders
 wdc scan --depth 3 --top 20 --throttle 5
 ```
 
-A scan runs in Windows background mode (low CPU, I/O and memory priority), on one thread, and
-prints the largest folders and files. Sizes are **sizes on disk**. A file with several names (hard
-links) is counted once, also when its other name is outside the scanned folders. Junctions and
-symbolic links are recorded and never followed. Sparse and compressed files count what is
-allocated. Cloud files not stored locally (OneDrive) count 0 and are never downloaded. Folders of
+A scan runs in Windows background mode (low CPU, I/O and memory priority), on one thread unless
+you ask for more, and prints the largest folders and files. Sizes are **sizes on disk**. A file
+with several names (hard links) is counted once, also when its other name is outside the scanned
+folders. Junctions and symbolic links are recorded and never followed. Sparse and compressed files
+count what is allocated. Cloud files not stored locally (OneDrive) count 0 and are never downloaded. Folders of
 1 GiB or more that no rule knows are flagged. A scan of the default scope also lists the **system
 items** Windows manages, read through Windows' own APIs and always report-only: Recycle Bin, paging,
 swap and hibernation files, error reports, crash and memory dumps, live kernel reports and System
 Restore (only an administrator can read the last one). Each names the Windows setting or tool that
 manages it.
+
+`wdc scan --jobs N` (1 to 4, default 1) walks with N threads, each still in background mode, with
+the same report; use it when you are waiting for the result. With more than one job the scan holds
+each folder's record until it merges them, so it uses more memory than with one job. In the app,
+the "Scan faster" switch does the same with 4 threads; it is off at every start and not saved.
 
 Each scan saves a compressed snapshot in `%LOCALAPPDATA%\WinDevCleaner\snapshots` (the last 10 are
 kept, and their total size is shown). The app shows the same data as a tree of sizes, with a "?" to
@@ -144,10 +149,11 @@ editors, Steam, Edge, pip, uv), the item is moved only while that program is clo
   The rest of a profile (history, passwords, cookies) is never touched.
 - pip's download and wheel cache, including the one of a Microsoft Store Python.
 - uv's package cache.
-- The browsers Playwright downloaded (one item per build; `npx playwright install` downloads them
-  again).
-- Temporary files and folders directly under `%TEMP%` that have not changed for 7 days. A file in
-  use keeps its item in place.
+- The browsers Playwright downloaded (one item per build, plus Playwright's own bookkeeping, which
+  it re-creates; `npx playwright install` downloads the browsers again).
+- Temporary files and folders directly under `%TEMP%` whose own date is more than 7 days old (a
+  folder whose contents changed recently can still qualify). A file in use keeps its item in
+  place.
 
 The old tool's crash dumps (`CrashDumps`, Camtasia's `CrashDumps`) are not carried over: they are
 diagnostic data, not caches that regenerate, so they stay unknown or report-only.
@@ -213,7 +219,8 @@ and `request_apply`. The app's view follows the agent: it shows the scan, the fo
 comparison, the system items, the programs or the plan the agent is reading. With the app open,
 every call runs in the app while you watch, with "Agent connected: <name>", every call live in the
 activity panel and "Pause agent" / "Disconnect agent" buttons. With it closed, `wdc mcp` runs
-headless (`wdc mcp --show` opens the app first).
+headless (`wdc mcp --show` opens the app first). The `scan` tool takes an optional `jobs` (1 to 4,
+default 1), the same as `wdc scan --jobs`, for when the person is waiting for the result.
 
 An agent can never apply, restore or purge. `request_apply` shows the plan on an approval card in
 the app, with each item's evidence, and the agent gets back approved, rejected or timed out; with

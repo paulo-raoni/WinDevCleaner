@@ -145,14 +145,22 @@ struct Live {
     current_ms: AtomicU64,
 }
 
-/// Marks a worker finished when dropped.
-struct Done<'a> {
+/// Marks a worker finished when dropped. A worker that panics never gives back the folder it was
+/// listing, so the others would wait for it forever: when dropped while panicking it stops the
+/// walk, and the panic reaches the caller when the workers are joined.
+struct Done<'a, P> {
     count: &'a Mutex<usize>,
     cv: &'a Condvar,
+    queue: &'a Mutex<Queue<P>>,
+    wake: &'a Condvar,
 }
 
-impl Drop for Done<'_> {
+impl<P> Drop for Done<'_, P> {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.queue.lock().unwrap_or_else(|e| e.into_inner()).stop = true;
+            self.wake.notify_all();
+        }
         *self.count.lock().unwrap_or_else(|e| e.into_inner()) += 1;
         self.cv.notify_all();
     }
@@ -188,7 +196,7 @@ pub(crate) fn walk_tree<W: DirWalker>(c: &mut Collector, root_idx: u32, root: W:
                 // Background mode is per thread: each worker lowers its own priorities.
                 let _background = crate::background::ThreadBackground::enter();
                 // Counted as finished even if the worker panics, so the caller never waits for it.
-                let _done = Done { count: &finished, cv: &finished_cv };
+                let _done = Done { count: &finished, cv: &finished_cv, queue: &queue, wake: &wake };
                 worker(walker, &queue, &wake, &next_id, &live, cancel, throttle, top_n, want_progress, started)
             }));
         }
@@ -363,4 +371,62 @@ fn merge(c: &mut Collector, root_idx: u32, mut recs: Vec<Option<DirRec>>) {
         }
     }
     debug_assert!(c.dirs.iter().all(|d| d.parent == NO_PARENT || (d.parent as usize) < c.dirs.len()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scan::ScanOptions;
+
+    /// A walker over numbered folders: the root (0) has three sub-folders, 1 to 3, and they have
+    /// none. Listing `panic_on` panics, as a worker would on a bug in a platform walker.
+    struct Fake {
+        panic_on: usize,
+    }
+
+    impl DirWalker for Fake {
+        type Path = usize;
+        fn fork(&self) -> Self {
+            Fake { panic_on: self.panic_on }
+        }
+        fn display(path: &usize) -> String {
+            path.to_string()
+        }
+        fn list<S: Sink>(&mut self, path: &usize, _sink: &mut S) -> Vec<(String, usize)> {
+            if *path == self.panic_on {
+                panic!("test: worker panics listing folder {path}");
+            }
+            if *path == 0 {
+                return (1..=3).map(|i| (format!("d{i}"), i)).collect();
+            }
+            Vec::new()
+        }
+    }
+
+    fn run(panic_on: usize) -> std::thread::Result<()> {
+        std::panic::catch_unwind(|| {
+            let options = ScanOptions { jobs: 3, ..Default::default() };
+            let mut c = Collector::new(&options, None, None);
+            let root = c.add_dir("root".into(), NO_PARENT);
+            walk_tree(&mut c, root, 0usize, &Fake { panic_on });
+        })
+    }
+
+    #[test]
+    fn a_walk_without_a_panic_finishes() {
+        assert!(run(usize::MAX).is_ok());
+    }
+
+    #[test]
+    fn a_panicking_worker_does_not_hang_the_others() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Detached on purpose: if the walk hangs, the test fails by the timeout below.
+        std::thread::spawn(move || {
+            let _ = tx.send(run(2));
+        });
+        let outcome = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the walk hung after a worker panicked");
+        assert!(outcome.is_err(), "the panic must reach the caller");
+    }
 }
