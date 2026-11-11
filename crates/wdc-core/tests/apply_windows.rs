@@ -13,7 +13,7 @@ use wdc_core::plan::{draft, DraftOptions, Plan, PlanItem};
 use wdc_core::presence::{Method, Proof};
 use wdc_core::quarantine;
 use wdc_core::rules::{Class, Context, RuleSet};
-use wdc_testkit::{fresh_dir, guard_assert, guard_assert_eq, junction, short_path, write_file, Vhdx};
+use wdc_testkit::{fresh_dir, guard_assert, guard_assert_eq, hold_exclusive, junction, short_path, write_file, Vhdx};
 
 const MIB: u64 = 1024 * 1024;
 
@@ -159,42 +159,121 @@ fn on_its_own_volume_apply_frees_nothing_and_purge_frees_what_was_expected() {
     wdc_testkit::remove_tree(&data);
 }
 
-#[test]
-#[ignore]
-fn a_junction_planned_or_swapped_in_moves_nothing() {
-    let base = fresh_dir("apply-junction");
+/// Items of the shader-cache and Steam rules, each as (tag, rule id, path below the profile).
+/// `nvidia-shader-caches` has three paths: all three are covered.
+const SHADER_AND_STEAM: [(&str, &str, &[&str]); 4] = [
+    ("dx", "nvidia-shader-caches", &["AppData", "Local", "NVIDIA", "DXCache"]),
+    ("gl", "nvidia-shader-caches", &["AppData", "Local", "NVIDIA", "GLCache"]),
+    ("compute", "nvidia-shader-caches", &["AppData", "Roaming", "NVIDIA", "ComputeCache"]),
+    ("steam", "steam-htmlcache", &["AppData", "Local", "Steam", "htmlcache"]),
+];
+
+/// A junction swapped in for the item after planning, or planned as the junction itself, moves
+/// nothing: the item (`below` the fake profile) belongs to `rule`.
+fn junction_moves_nothing(tag: &str, rule: &str, below: &[&str]) {
+    let base = fresh_dir(&format!("apply-junction-{tag}"));
     let profile = base.join("u");
     std::fs::create_dir_all(profile.join("AppData").join("Local").join("Temp")).unwrap();
-    let cache = profile.join("AppData").join("Roaming").join("Code").join("CachedData");
+    let cache = below.iter().fold(profile.clone(), |p, name| p.join(name));
     std::fs::create_dir_all(&cache).unwrap();
     write_file(&cache.join("a.bin"), 2 * MIB);
     let data = base.join("data");
     let c = ctx(&profile, &[]);
     // The target is inside C:\Windows.
-    let target = PathBuf::from(std::env::var("WINDIR").unwrap()).join("Temp").join(format!("wdc-junction-{}", std::process::id()));
+    let target = PathBuf::from(std::env::var("WINDIR").unwrap()).join("Temp").join(format!("wdc-junction-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&target).unwrap();
     write_file(&target.join("system.dat"), 4096);
 
     // Swapped in after planning.
     let d = draft(&DraftOptions { paths: vec![s(&cache)], ..Default::default() }, &RuleSet::built_in(), &c, Some(&s(&data)), now());
-    assert_eq!(d.plan.items.len(), 1, "{:#?}", d.not_included);
+    assert_eq!(d.plan.items.len(), 1, "{rule}: {:#?}", d.not_included);
+    assert_eq!(d.plan.items[0].rule_id, rule, "{tag}");
     std::fs::rename(&cache, base.join("moved-away")).unwrap();
     junction(&cache, &target);
     let r = apply_plan(&d.plan, &c, &data, true);
-    assert_eq!(r.moved, 0, "{:#?}", r.items);
+    assert_eq!(r.moved, 0, "{rule} ({tag}): {:#?}", r.items);
     // Its file ID differs from the plan's too, but it is refused first because it is a link.
-    guard_assert!("apply-link", matches!(r.items[0].skipped, Some(Skip::IsLink)), "refused as a link: {:#?}", r.items);
+    guard_assert!("apply-link", matches!(r.items[0].skipped, Some(Skip::IsLink)), "{rule} ({tag}) refused as a link: {:#?}", r.items);
 
     // Planned as the junction itself, with its own file ID (a hand-written plan).
-    let r = apply_plan(&crafted(&cache, "vscode-caches"), &c, &data, true);
-    guard_assert_eq!("apply-link", r.moved, 0, "a junction is never moved: {:#?}", r.items);
-    assert!(matches!(r.items[0].skipped, Some(Skip::IsLink)), "{:#?}", r.items);
-    assert!(target.join("system.dat").exists() && cache.exists(), "the junction and its target are untouched");
+    let r = apply_plan(&crafted(&cache, rule), &c, &data, true);
+    guard_assert_eq!("apply-link", r.moved, 0, "{rule} ({tag}): a junction is never moved: {:#?}", r.items);
+    assert!(matches!(r.items[0].skipped, Some(Skip::IsLink)), "{rule} ({tag}): {:#?}", r.items);
+    assert!(target.join("system.dat").exists() && cache.exists(), "{rule} ({tag}): the junction and its target are untouched");
     std::fs::remove_dir(&cache).unwrap();
     wdc_testkit::remove_tree(&target);
     wdc_testkit::remove_tree(&base);
 }
 
+#[test]
+#[ignore]
+fn a_junction_planned_or_swapped_in_moves_nothing() {
+    junction_moves_nothing("vscode", "vscode-caches", &["AppData", "Roaming", "Code", "CachedData"]);
+}
+
+#[test]
+#[ignore]
+fn a_junction_swapped_in_for_a_shader_or_steam_cache_moves_nothing() {
+    for (tag, rule, below) in SHADER_AND_STEAM {
+        junction_moves_nothing(tag, rule, below);
+    }
+}
+
+/// A program holding a file of the item with no sharing (a running game, Steam) keeps the whole
+/// folder in place: apply renames the folder through one handle, and Windows refuses that while
+/// a file inside is open. Nothing is moved, nothing is in quarantine; with the handle gone the
+/// same plan applies, and restore gives the identical tree.
+#[test]
+#[ignore]
+fn a_file_held_open_keeps_the_whole_folder_in_place() {
+    for (tag, rule, below) in SHADER_AND_STEAM {
+        let base = fresh_dir(&format!("apply-held-{tag}"));
+        let profile = base.join("u");
+        std::fs::create_dir_all(profile.join("AppData").join("Local").join("Temp")).unwrap();
+        let item = below.iter().fold(profile.clone(), |p, name| p.join(name));
+        std::fs::create_dir_all(item.join("sub")).unwrap();
+        write_file(&item.join("sub").join("big.bin"), 2 * MIB);
+        write_file(&item.join("held.dat"), 4096);
+        write_file(&item.join("other.txt"), 100);
+        let data = base.join("data");
+        let c = ctx(&profile, &[]);
+        let d = draft(&DraftOptions { paths: vec![s(&item)], ..Default::default() }, &RuleSet::built_in(), &c, Some(&s(&data)), now());
+        assert_eq!(d.plan.items.len(), 1, "{rule} ({tag}): {:#?}", d.not_included);
+        assert_eq!(d.plan.items[0].rule_id, rule, "{tag}");
+        let before = tree(&item);
+
+        let held = hold_exclusive(&item.join("held.dat"));
+        let r = apply_plan(&d.plan, &c, &data, false);
+        println!("{rule} ({tag}) with a file held open: {:?}", r.items[0].skipped);
+        assert_eq!(r.moved, 0, "{rule} ({tag}): a held file keeps the folder in place: {:#?}", r.items);
+        assert!(r.items[0].skipped.is_some(), "{rule} ({tag}): the item is reported skipped: {:#?}", r.items);
+        assert_eq!(tree(&item), before, "{rule} ({tag}): the tree is identical");
+        assert!(quarantine::list(&data).is_empty(), "{rule} ({tag}): nothing recorded in quarantine");
+        let in_quarantine = if data.join("quarantine").exists() { tree(&data.join("quarantine")) } else { BTreeMap::new() };
+        // No copy of any part of the item: outside the top-level index, only folders (a failed
+        // rename may leave the empty `<plan-hash>\q` folders), and the index lists no entry.
+        let files: Vec<&String> = in_quarantine.keys().filter(|k| !k.ends_with('\\') && k.as_str() != "index.json").collect();
+        let index_entries = match std::fs::read_to_string(data.join("quarantine").join("index.json")) {
+            Ok(text) => serde_json::from_str::<Vec<serde_json::Value>>(&text).unwrap_or_else(|e| panic!("{rule} ({tag}): the index is not a JSON list: {e}: {text:?}")),
+            Err(_) => Vec::new(),
+        };
+        assert!(
+            files.is_empty() && index_entries.is_empty(),
+            "{rule} ({tag}): no copy in quarantine: files {files:?}, index entries {index_entries:?}, whole tree {in_quarantine:?}"
+        );
+
+        // The program lets go: the same plan applies, and restore puts everything back.
+        drop(held);
+        let r = apply_plan(&d.plan, &c, &data, false);
+        assert_eq!(r.moved, 1, "{rule} ({tag}): {:#?}", r.items);
+        assert!(!item.exists(), "{rule} ({tag}): the item moved out");
+        let entry = quarantine::list(&data)[0].clone();
+        assert_eq!(tree(Path::new(&entry.stored)), before, "{rule} ({tag}): quarantine holds the same tree");
+        quarantine::restore(&data, &entry.id, &c, &proof()).unwrap_or_else(|e| panic!("{rule} ({tag}): restore refused: {e:?}"));
+        assert_eq!(tree(&item), before, "{rule} ({tag}): restore gives the identical tree");
+        wdc_testkit::remove_tree(&base);
+    }
+}
 #[test]
 #[ignore]
 fn forbidden_places_are_refused_however_the_path_is_written() {

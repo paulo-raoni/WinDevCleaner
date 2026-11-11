@@ -568,6 +568,27 @@ messages! {
     ExplainHow =>
         "How to manage it: {text}",
         "Como gerenciar: {text}";
+    ExplainManualHeader =>
+        "Manual steps (this tool never deletes it):",
+        "Passos manuais (esta ferramenta nunca apaga isto):";
+    ManualCloseApp =>
+        "Close the NVIDIA app.",
+        "Feche o app NVIDIA.";
+    ManualOpenPowerShell =>
+        "Open PowerShell as administrator.",
+        "Abra o PowerShell como administrador.";
+    ManualRunCommand =>
+        "Run this command:",
+        "Rode este comando:";
+    ManualExplainAgain =>
+        "Run `wdc explain` on the folder {parent} again to see what is left.",
+        "Rode `wdc explain` de novo na pasta {parent} para ver o que sobrou.";
+    ManualKeepNewer =>
+        "Do not delete this artifact: its driver version {artifact} is newer than the installed driver {installed}, so it may be a pending update.",
+        "Não apague este artefato: a versão de driver dele, {artifact}, é mais nova que o driver instalado, {installed}, então pode ser uma atualização pendente.";
+    ManualKeepUnknown =>
+        "Do not delete this artifact: the versions could not be compared ({why}).",
+        "Não apague este artefato: não foi possível comparar as versões ({why}).";
     ExplainConditions =>
         "Conditions:",
         "Condições:";

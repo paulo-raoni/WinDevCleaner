@@ -42,10 +42,27 @@ is present.
   the quarantine with restore and purge. When an AI agent connects through `wdc mcp`, the
   window shows "Agent connected: <name>", every call live in the activity panel, and "Pause
   agent" / "Disconnect agent" buttons.
-- `wdc plan` drafts a plan: the items built-in rules may move now (VS Code obsolete extensions
-  and interrupted installs, VS Code and NVIDIA caches, Steam's web cache), each explained, with its
+- `wdc plan` drafts a plan: the items built-in rules may move now, each explained, with its
   size on disk and what deleting it would free. A plan is a list of choices, not an
-  authorisation; it changes nothing.
+  authorisation; it changes nothing. What `wdc apply` can clean in version 1, and nothing else:
+  - obsolete extensions that VS Code, VS Code Insiders and Cursor listed for removal and no
+    longer reference;
+  - the folders of interrupted extension installs (GUID-named, older than a day) of the same
+    three editors;
+  - the caches of the same three editors (`Cache`, `CachedData`, `CachedExtensionVSIXs`,
+    `Code Cache`, `GPUCache`);
+  - the C/C++ extension's IntelliSense cache (`ipch`);
+  - NVIDIA shader caches (`DXCache`, `GLCache`, `ComputeCache`): while a game or GPU app holds
+    a file in one, that folder is left in place; close the program and run again;
+  - Steam's web cache (`htmlcache`).
+
+  Where a rule names a program (the editors, Steam), the item is moved only while that program
+  is closed. NVIDIA app
+  update artifacts (`ota-artifacts`) are never deleted by the tool in version 1, because that
+  needs administrator rights: `wdc explain` on one gives the exact manual steps (close the NVIDIA
+  app, a PowerShell command to run as administrator for that folder, then explain again), or says
+  not to delete it when it is newer than the installed driver or the versions cannot be compared.
+  `explain --json` and the MCP `explain` tool carry the steps as `manual_steps`.
 - `wdc apply --plan FILE` trusts nothing in the plan: for each item it opens the item once without
   following links, checks on that open handle its real path (short names, `..` and trailing dots
   resolved by Windows) against the allowed and forbidden places and its file ID against the plan,

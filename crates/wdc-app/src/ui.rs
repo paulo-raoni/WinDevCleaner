@@ -474,6 +474,16 @@ fn explain_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
                 }
             }
         }
+        if let Some(m) = &e.manual {
+            ui.label(RichText::new(lang.t(Msg::ExplainManualHeader)).strong());
+            for (n, step) in m.steps(lang).iter().enumerate() {
+                ui.label(format!("{}. {}", n + 1, step.text));
+                if let Some(command) = &step.command {
+                    // The command to copy: monospace, selectable, never translated.
+                    ui.add(egui::Label::new(RichText::new(command).monospace()).selectable(true));
+                }
+            }
+        }
         if !e.match_conditions.is_empty() || !e.require_conditions.is_empty() {
             ui.label(RichText::new(lang.t(Msg::ExplainConditions)).strong());
             for c in e.match_conditions.iter().chain(&e.require_conditions) {
