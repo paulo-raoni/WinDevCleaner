@@ -231,8 +231,9 @@ denies `wdc apply`, `restore` and `purge` (a convenience only: such rules match 
 ## What happened to the old tool
 
 The first WinDevCleaner was a Python menu program with two entries, "Limpeza padrão (Cleaner)" and
-"Obliterate Program", plus a separate script, "Insanity mode" (`programs_parser.py`). It is kept in
-`legacy/` as `.txt` files, for reference only, until the end of the rebuild. The audit that led to
+"Obliterate Program", plus a separate script, "Insanity mode" (`programs_parser.py`). It was
+removed at the end of the rebuild and is still in the git history; the last commit that has it is
+`5ff166f` (for example `git show 5ff166f:legacy/cleaner.py.txt`). The audit that led to
 the rewrite is section 2 of [the rebuild plan](docs/rebuild-plan.md).
 
 | Old mode | What replaced it |
