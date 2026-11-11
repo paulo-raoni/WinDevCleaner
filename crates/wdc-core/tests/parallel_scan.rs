@@ -247,7 +247,7 @@ fn a_file_with_several_names_in_folders_of_different_workers_counts_once() {
             std::fs::metadata(root.join("s00").join(format!("file{f}.dat"))).unwrap().blocks() * 512
         })
         .sum();
-    assert_eq!(one.totals.bytes_on_disk, expected_once, "one job: each file counts once");
+    guard_assert_eq!("hardlink-dedup", one.totals.bytes_on_disk, expected_once, "one job: each file counts once");
     for jobs in [2usize, 4] {
         for _ in 0..3 {
             let r = run(&[&root], &[], jobs, false);
