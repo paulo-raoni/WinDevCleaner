@@ -1,7 +1,7 @@
 //! `wdc mcp` with the app closed: the engine runs headless and answers over MCP stdio.
 //! Platform-independent (it also runs in the Linux cloud session).
 
-use wdc_testkit::{fresh_dir, McpClient};
+use wdc_testkit::{fresh_dir, guard_assert, McpClient};
 
 #[test]
 fn mcp_client_scans_and_drills_down_headless() {
@@ -132,4 +132,32 @@ fn request_apply_without_the_app_changes_nothing() {
     assert_eq!(r["structuredContent"]["held_bytes"], 0, "{r}");
     assert_eq!(c.close(), Some(0));
     wdc_testkit::remove_tree(&base);
+}
+
+/// Every result says whether the app is attached, and the instructions never claim the person
+/// is watching when nobody is.
+#[test]
+fn headless_results_and_instructions_say_nobody_is_watching() {
+    let data = fresh_dir("mcp-headless-mode-data");
+    let mut c = McpClient::start(
+        std::path::Path::new(env!("CARGO_BIN_EXE_wdc")),
+        &[],
+        &[("WDC_DATA_DIR", data.as_os_str()), ("WDC_PIPE_SUFFIX", std::ffi::OsStr::new("-headless-mode-test"))],
+    );
+    let init = c.initialize("headless-mode-client");
+    let instructions = init["instructions"].as_str().unwrap();
+    assert!(instructions.contains("not watching"), "{instructions}");
+    assert!(instructions.contains("open the WinDevCleaner app"), "{instructions}");
+    assert!(!instructions.contains("watches every call"), "{instructions}");
+
+    let r = c.call("quarantine", serde_json::json!({}));
+    assert_ne!(r["isError"], true, "{r}");
+    guard_assert!("mcp-app-field", r["structuredContent"]["app"] == "headless", "a result carries the mode: {r}");
+    assert!(r["structuredContent"].get("app_reason").is_none(), "{r}");
+
+    let r = c.call("tree", serde_json::json!({ "path": "C:\\nowhere" }));
+    assert_eq!(r["isError"], true, "{r}");
+    guard_assert!("mcp-app-field", r["structuredContent"]["app"] == "headless", "an error carries the mode too: {r}");
+    assert_eq!(c.close(), Some(0));
+    wdc_testkit::remove_tree(&data);
 }

@@ -11,8 +11,11 @@ All notable changes to WinDevCleaner are listed here. The format follows
 - An icon for `WinDevCleaner.exe` and `wdc.exe` (Explorer, Start menu, taskbar), for the app window, for the Start menu shortcut and for the entry in Settings > Apps.
 - The installer shows the MIT licence and a finish page that says where WinDevCleaner was installed and that `wdc` works in any new terminal, with an "Open WinDevCleaner now" option (checked by default). Silent installs (`/qn`) still show nothing.
 
+- Every MCP tool result carries `app` (`connected`, `headless` or `blocked`, plus `app_reason` when blocked), and the server's instructions say whether the person is watching in the app: a headless server no longer claims they are.
+
 ### Fixed
 
+- `wdc mcp` started with the app closed now looks for the app before each call and switches to it when it is opened, so the next call shows in the app's activity panel. An agent the person disconnected, or one refused because another agent is attached, still gets errors and never falls back to headless.
 - `plan` leaves out an item another program holds open ("held open by: NVIDIA Container, NVIDIA Overlay. Close them and draft again."), found through the Windows Restart Manager, which only reads: no program is closed or signalled. For a large folder only the first 4,096 files are checked.
 - `apply` names the holders when an item is held open after the plan ("held open by X; close it and run again") and reports an open failure (`open-failed`) apart from a rename failure (`rename-failed`); nothing is ever forced. `apply --json` carries `holders` and `stage` on such a skip.
 - `temp-old` (and the VS Code staging-folder rules) no longer offer a folder whose contents changed recently: the age is that of the newest file inside, not only the folder's own date.

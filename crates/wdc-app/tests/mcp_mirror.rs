@@ -165,3 +165,115 @@ fn an_mcp_client_drives_a_scan_and_the_app_mirrors_it_live() {
     wdc_testkit::remove_tree(&fixture);
     wdc_testkit::remove_tree(&profile);
 }
+
+/// The client started while the app was closed; the person opens the app afterwards. The next
+/// call goes through the app (mirrored in its activity log) and says so.
+#[test]
+#[ignore]
+fn an_app_opened_after_the_client_started_gets_the_next_call() {
+    let fixture = fresh_dir("late-app-fixture");
+    write_file(&fixture.join("a.bin"), 1024 * 1024);
+    let data = fresh_dir("late-app-data");
+    let suffix = format!("-late-app-test-{}", std::process::id());
+    let pipe = wdc_core::link::pipe::pipe_name_with_suffix(&suffix).unwrap();
+    let env: Vec<(&str, &OsStr)> = vec![
+        ("WDC_DATA_DIR", data.as_os_str()),
+        ("WDC_PIPE_SUFFIX", OsStr::new(&suffix)),
+        ("WDC_LANG", OsStr::new("en")),
+    ];
+
+    // The agent's session starts with the app closed.
+    let mut mcp = McpClient::start(&target_bin("wdc"), &[], &env);
+    let init = mcp.initialize("wdc-late-client");
+    assert!(init["instructions"].as_str().unwrap().contains("not watching"), "{init}");
+    let r = mcp.call("quarantine", serde_json::json!({}));
+    assert_eq!(r["structuredContent"]["app"], "headless", "{r}");
+
+    // The person opens the app.
+    let mut app_cmd = std::process::Command::new(env!("CARGO_BIN_EXE_WinDevCleaner"));
+    for (k, v) in &env {
+        app_cmd.env(k, v);
+    }
+    let mut app = KillOnDrop(app_cmd.spawn().expect("start the app"));
+    assert!(wait_for_pipe(&pipe, Duration::from_secs(60)), "the app did not open its agent pipe");
+    assert!(app.0.try_wait().unwrap().is_none(), "the app exited early");
+
+    // The next call reaches it.
+    let r = mcp.call("scan", serde_json::json!({ "roots": [fixture.to_string_lossy()] }));
+    assert_ne!(r["isError"], true, "{r}");
+    guard_assert!("mcp-upgrade", r["structuredContent"]["app"] == "connected", "the call went through the app: {r}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut log = activity(&data);
+    while Instant::now() < deadline
+        && !log.iter().any(|e| e["kind"] == "call" && e["tool"] == "scan" && e["status"] == "done")
+    {
+        std::thread::sleep(Duration::from_millis(100));
+        log = activity(&data);
+    }
+    guard_assert!(
+        "mcp-upgrade",
+        log.iter().any(|e| e["kind"] == "connected" && e["client"] == "wdc-late-client")
+            && log.iter().any(|e| e["kind"] == "call" && e["tool"] == "scan" && e["status"] == "done"),
+        "the app's activity log shows the agent and its scan: {log:?}"
+    );
+    // Once attached it stays attached; the headless scan is gone, so `tree` says to scan again.
+    let r = mcp.call("tree", serde_json::json!({ "path": fixture.to_string_lossy() }));
+    assert_eq!(r["structuredContent"]["app"], "connected", "{r}");
+    assert_eq!(mcp.close(), Some(0));
+    assert!(app.0.try_wait().unwrap().is_none(), "the app is still running");
+    drop(app);
+    wdc_testkit::remove_tree(&fixture);
+}
+
+/// An agent the person disconnected in the app gets errors from then on, and never a headless
+/// result: its results say `blocked` with the reason.
+#[test]
+fn a_disconnected_agent_gets_errors_and_never_headless_results() {
+    use std::sync::atomic::AtomicBool;
+    use wdc_core::link::pipe::{accept, create_instance};
+    use wdc_core::link::{serve_session, AgentHandler, LinkControl};
+
+    struct Echo;
+    impl AgentHandler for Echo {
+        fn connected(&self, _: &str) {}
+        fn disconnected(&self, _: &str, _: &str) {}
+        fn call_started(&self, _: &str, _: &str, _: &serde_json::Value, _: bool) -> u64 {
+            1
+        }
+        fn call_resumed(&self, _: u64) {}
+        fn call(&self, tool: &str, _: &serde_json::Value, _: &AtomicBool) -> Result<serde_json::Value, String> {
+            Ok(serde_json::json!({ "tool": tool }))
+        }
+        fn call_finished(&self, _: u64, _: &Result<serde_json::Value, String>) {}
+    }
+
+    let data = fresh_dir("disconnected-data");
+    let suffix = format!("-disconnected-test-{}", std::process::id());
+    let pipe = wdc_core::link::pipe::pipe_name_with_suffix(&suffix).unwrap();
+    let instance = create_instance(&pipe, true).expect("create pipe");
+    let control = LinkControl::new();
+    let served = control.clone();
+    let server = std::thread::spawn(move || {
+        let mut conn = accept(instance).expect("accept");
+        serve_session(&mut conn, &served, &Echo);
+    });
+    let env: Vec<(&str, &OsStr)> =
+        vec![("WDC_DATA_DIR", data.as_os_str()), ("WDC_PIPE_SUFFIX", OsStr::new(&suffix))];
+    let mut mcp = McpClient::start(&target_bin("wdc"), &[], &env);
+    let init = mcp.initialize("wdc-disconnect-client");
+    assert!(init["instructions"].as_str().unwrap().contains("watches every call live"), "{init}");
+    let r = mcp.call("quarantine", serde_json::json!({}));
+    assert_eq!(r["structuredContent"]["app"], "connected", "{r}");
+
+    control.disconnect();
+    for _ in 0..3 {
+        let r = mcp.call("quarantine", serde_json::json!({}));
+        assert_eq!(r["isError"], true, "a disconnected agent gets an error: {r}");
+        guard_assert!("mcp-app-field", r["structuredContent"]["app"] == "blocked", "{r}");
+        assert!(r["structuredContent"]["app_reason"].as_str().unwrap().contains("disconnected"), "{r}");
+        assert!(r["structuredContent"].get("held_bytes").is_none(), "no headless result: {r}");
+    }
+    assert_eq!(mcp.close(), Some(0));
+    let _ = server.join();
+    wdc_testkit::remove_tree(&data);
+}
