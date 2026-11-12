@@ -22,6 +22,10 @@ All notable changes to WinDevCleaner are listed here. The format follows
 - `explain`, `plan` and the approval card now show the real size of a file (a 541 MB `update.exe` showed 0 B), and a file with another name outside the item still counts as freeing nothing.
 - `explain` says when a size is partial ("N items could not be read") and `--json` carries `errors`, `complete` and `first_error_kind`, instead of showing a folder it could not read as 0.
 - `plan` no longer offers an item whose size is incomplete or an item that would free 0 bytes; both are listed under "left out" with their own reason.
+- Rule sources are neutral, checkable statements (the product's documentation or the layout it keeps) instead of notes about one machine, and every rule now has a pt-BR source (`source_pt_br`, optional in local rule files), shown by `explain` in the CLI and the app. A test keeps the built-in rule files free of personal and private-machine wording.
+- The pip rule's evidence names both cache locations; the NVIDIA artifact rule says deleting it "may need" an administrator.
+- A `User Data` folder is treated as a browser profile only when it holds Chromium's `Local State` file (or cannot be checked) or sits under a known browser vendor's folder, so an application's own `User Data\Download` (CapCut) is no longer forbidden. Real browser profiles stay forbidden.
+- An item that sits inside the allowed roots by name but resolves through a link to a place outside them (Edge's `User Data` junction) is refused with the reason `resolves-outside-allowed-roots` and the real path ("resolves through a link to D:\..., outside the allowed roots"). Links are still never followed.
 
 ## [1.0.0-rc.1] - 2026-11-11
 

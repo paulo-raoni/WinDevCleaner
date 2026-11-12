@@ -123,6 +123,9 @@ pub struct Rule {
     pub evidence_pt_br: String,
     /// Where the evidence comes from: documentation, an observed case with its date, or a check.
     pub source: String,
+    /// `source` in pt-BR; when empty (an older local rule file), `source` is shown.
+    #[serde(default)]
+    pub source_pt_br: String,
     pub cost: String,
     pub cost_pt_br: String,
     #[serde(default)]
@@ -149,6 +152,12 @@ impl Rule {
         match lang {
             Lang::En => &self.evidence,
             Lang::PtBr => &self.evidence_pt_br,
+        }
+    }
+    pub fn source(&self, lang: Lang) -> &str {
+        match lang {
+            Lang::PtBr if !self.source_pt_br.trim().is_empty() => &self.source_pt_br,
+            _ => &self.source,
         }
     }
     pub fn cost(&self, lang: Lang) -> &str {
@@ -757,10 +766,28 @@ mod tests {
             }
             assert_eq!(r.instructions.is_some(), r.instructions_pt_br.is_some(), "{}", r.id);
             assert!(!r.source.is_empty() && !r.last_verified.is_empty(), "{}", r.id);
+            assert!(!r.source_pt_br.trim().is_empty(), "{} lacks a pt-BR source", r.id);
             if r.class == Class::NeverTouch || r.class == Class::AppManaged {
                 assert_ne!(r.action, Action::Quarantine, "{} can never be quarantined", r.id);
             }
         }
+    }
+
+    #[test]
+    fn built_in_rule_files_name_no_person_and_no_private_machine() {
+        // Whole words, any case: "abandono" is not "dono". Covers every field of every rule, both
+        // languages, and the comments, because the whole file text is read.
+        let words = regex_lite::Regex::new(r"(?i)\b(owner|dono|paulo|raoni)\b").unwrap();
+        let mut found = Vec::new();
+        for (name, text) in BUILT_IN {
+            for (n, line) in text.lines().enumerate() {
+                if let Some(m) = words.find(line) {
+                    found.push(format!("{name}:{}: {}", n + 1, m.as_str()));
+                }
+            }
+        }
+        assert!(found.is_empty(), "rule texts must be neutral: {found:?}");
+        assert!(words.is_match("the Owner's machine") && words.is_match("DONO") && !words.is_match("abandono"));
     }
 
     #[test]

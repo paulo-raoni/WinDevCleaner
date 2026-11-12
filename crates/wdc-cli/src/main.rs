@@ -555,7 +555,7 @@ pub fn print_explanation(lang: Lang, e: &wdc_core::explain::Explanation) {
                 println!("  {}", lang.fmt(Msg::ExplainLocalRuleNote, &[("file", file)]));
             }
             println!("  {}", lang.fmt(Msg::ExplainEvidence, &[("text", full.evidence(lang))]));
-            println!("  {}", lang.fmt(Msg::ExplainSource, &[("text", &full.source)]));
+            println!("  {}", lang.fmt(Msg::ExplainSource, &[("text", full.source(lang))]));
             println!("  {}", lang.fmt(Msg::ExplainCost, &[("text", full.cost(lang))]));
             if let Some(how) = full.instructions(lang) {
                 println!("  {}", lang.fmt(Msg::ExplainHow, &[("text", how)]));

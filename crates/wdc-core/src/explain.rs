@@ -41,6 +41,8 @@ pub enum WhyNot {
     IsLink,
     AllowedRootItself,
     OutsideAllowedRoots,
+    /// The item sits inside the allowed roots by its name, but a link leads its real place outside them.
+    ResolvesOutsideAllowedRoots { final_path: String },
     Forbidden { forbid: Forbid },
     /// Part of the item could not be read, so its size is incomplete (set by `plan`).
     NotFullyReadable,
@@ -63,6 +65,7 @@ impl WhyNot {
             WhyNot::IsLink => lang.t(Msg::WhyIsLink).into(),
             WhyNot::AllowedRootItself => lang.t(Msg::WhyAllowedRoot).into(),
             WhyNot::OutsideAllowedRoots => lang.t(Msg::WhyOutsideRoots).into(),
+            WhyNot::ResolvesOutsideAllowedRoots { final_path } => lang.fmt(Msg::WhyResolvesOutsideRoots, &[("path", final_path)]),
             WhyNot::Forbidden { forbid } => lang.fmt(Msg::WhyForbidden, &[("why", forbid.text(lang))]),
             WhyNot::NotFullyReadable => lang.t(Msg::WhyNotFullyReadable).into(),
             WhyNot::NothingToFree => lang.t(Msg::WhyNothingToFree).into(),
@@ -72,7 +75,7 @@ impl WhyNot {
 }
 
 /// Exact manual steps for an item the tool never deletes itself (version 1: NVIDIA update
-/// artifacts, which need administrator rights).
+/// artifacts, which may need administrator rights).
 #[derive(Clone, Debug, PartialEq)]
 pub enum ManualSteps {
     /// The artifact is not newer than the installed driver: how to remove it by hand.
@@ -388,7 +391,14 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
     if act_scope.is_allowed_root {
         why_not.push(WhyNot::AllowedRootItself);
     } else if act_scope.allowed_root.is_none() {
-        why_not.push(WhyNot::OutsideAllowedRoots);
+        match &final_path {
+            // GUARD-BEGIN(resolves-outside)
+            Some(f) if canon(f).to_lowercase() != canon(&item).to_lowercase() => {
+                why_not.push(WhyNot::ResolvesOutsideAllowedRoots { final_path: canon(f) })
+            }
+            // GUARD-END(resolves-outside)
+            _ => why_not.push(WhyNot::OutsideAllowedRoots),
+        }
     }
     if let Some(f) = &act_scope.forbidden {
         why_not.push(WhyNot::Forbidden { forbid: f.clone() });

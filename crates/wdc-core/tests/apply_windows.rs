@@ -532,3 +532,41 @@ fn a_quarantine_folder_that_is_a_link_is_refused() {
     std::fs::remove_dir(data.join("quarantine")).unwrap();
     wdc_testkit::remove_tree(&base);
 }
+
+#[test]
+#[ignore]
+fn an_edge_cache_behind_a_junction_out_of_the_roots_says_where_it_leads() {
+    let base = fresh_dir("apply-edge-junction");
+    let profile = base.join("u");
+    let local = profile.join("AppData").join("Local");
+    std::fs::create_dir_all(local.join("Temp")).unwrap();
+    // Edge's `User Data` is a junction to a folder on another place, outside every allowed root.
+    let offload = base.join("offload").join("edge-user-data");
+    let cache = offload.join("Default").join("Cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    write_file(&cache.join("data_1"), 2 * MIB);
+    let edge = local.join("Microsoft").join("Edge");
+    std::fs::create_dir_all(&edge).unwrap();
+    junction(&edge.join("User Data"), &offload);
+
+    let c = ctx(&profile, &[]);
+    let e = wdc_core::explain::explain(&s(&edge.join("User Data").join("Default").join("Cache")), &RuleSet::built_in(), &c, None);
+    let real = std::fs::canonicalize(&cache).unwrap();
+    let real = real.to_string_lossy().into_owned();
+    let real = real.strip_prefix(r"\\?\").unwrap_or(&real).to_lowercase();
+    let found = e.why_not.iter().find_map(|w| match w {
+        WhyNot::ResolvesOutsideAllowedRoots { final_path } => Some(final_path.to_lowercase()),
+        _ => None,
+    });
+    guard_assert!("resolves-outside", found.as_deref() == Some(real.as_str()), "expected the final path {real}: {:?}", e.why_not);
+    assert!(!e.why_not.contains(&WhyNot::OutsideAllowedRoots), "{:?}", e.why_not);
+    assert!(!e.actionable);
+    let json = serde_json::to_value(e.why_not.iter().find(|w| matches!(w, WhyNot::ResolvesOutsideAllowedRoots { .. })).unwrap()).unwrap();
+    assert_eq!(json["reason"], "resolves-outside-allowed-roots");
+    assert_eq!(json["final_path"].as_str().map(str::to_lowercase).as_deref(), Some(real.as_str()));
+    let text = e.why_not.iter().find(|w| matches!(w, WhyNot::ResolvesOutsideAllowedRoots { .. })).unwrap().text(wdc_core::i18n::Lang::PtBr);
+    assert!(text.contains("passa por um link"), "{text}");
+    assert!(cache.join("data_1").exists());
+    std::fs::remove_dir(edge.join("User Data")).unwrap();
+    wdc_testkit::remove_tree(&base);
+}

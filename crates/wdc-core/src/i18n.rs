@@ -502,6 +502,9 @@ messages! {
     WhyOutsideRoots =>
         "outside the allowed roots",
         "fora das raízes permitidas";
+    WhyResolvesOutsideRoots =>
+        "resolves through a link to {path}, outside the allowed roots",
+        "passa por um link até {path}, fora das raízes permitidas";
     WhyForbidden =>
         "forbidden: {why}",
         "proibido: {why}";

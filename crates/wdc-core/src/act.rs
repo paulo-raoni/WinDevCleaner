@@ -175,7 +175,7 @@ pub fn forbidden_reason(path: &str, is_dir: bool, ctx: &Context, data_dir: Optio
         let cache = rest.iter().any(|s| {
             ["cache", "code cache", "gpucache", "shadercache", "grshadercache", "dawncache"].contains(s)
         });
-        if !cache {
+        if !cache && is_browser_user_data(&p, &segs[..i], i) {
             return Some(Forbid::BrowserProfile);
         }
     }
@@ -191,6 +191,56 @@ pub fn forbidden_reason(path: &str, is_dir: bool, ctx: &Context, data_dir: Optio
         return Some(Forbid::GitRepository);
     }
     None
+}
+
+/// The browser vendors whose `User Data` folder is a browser profile store, by the segments above it.
+fn is_browser_vendor_parent(before: &[&str]) -> bool {
+    let n = before.len();
+    let last = before.last().copied().unwrap_or("");
+    let pair = if n >= 2 { (before[n - 2], last) } else { ("", last) };
+    matches!(pair, ("google", "chrome") | ("microsoft", "edge") | ("bravesoftware", "brave-browser"))
+        || ["vivaldi", "chromium", "opera software"].contains(&last)
+}
+
+/// What a look for Chromium's `Local State` file says: only a file that is certainly absent
+/// means "not a profile"; any other outcome, an error included, counts as a profile (fail safe).
+fn local_state_means_profile(look: std::io::Result<std::fs::Metadata>) -> bool {
+    match look {
+        Ok(_) => true,
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
+/// Whether the `User Data` folder at segment `i` of `p` (original case) is a browser profile
+/// store, not an application's own folder of that name: its parent is a known browser vendor's
+/// folder, or it holds Chromium's `Local State`. `before` is the lower-case segments above it.
+fn is_browser_user_data(p: &str, before: &[&str], i: usize) -> bool {
+    let mut profile = false;
+    // GUARD-BEGIN(profile-vendor)
+    profile |= is_browser_vendor_parent(before);
+    // GUARD-END(profile-vendor)
+    if !profile {
+        // The folder's own path: `p` up to the end of its segment `i`.
+        let mut pos = 0;
+        let mut seen = 0;
+        let mut end = p.len();
+        for part in p.split('\\') {
+            pos += part.len();
+            if !part.is_empty() {
+                if seen == i {
+                    end = pos;
+                    break;
+                }
+                seen += 1;
+            }
+            pos += 1;
+        }
+        let state = crate::rules::native(&format!("{}\\Local State", &p[..end]));
+        // GUARD-BEGIN(profile-local-state)
+        profile = local_state_means_profile(std::fs::symlink_metadata(state));
+        // GUARD-END(profile-local-state)
+    }
+    profile
 }
 
 /// The verdict for a final path.

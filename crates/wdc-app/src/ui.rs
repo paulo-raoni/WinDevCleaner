@@ -559,7 +559,7 @@ fn explain_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
                     ui.label(lang.fmt(Msg::ExplainLocalRuleNote, &[("file", file)]));
                 }
                 ui.label(lang.fmt(Msg::ExplainEvidence, &[("text", full.evidence(lang))]));
-                ui.label(RichText::new(lang.fmt(Msg::ExplainSource, &[("text", &full.source)])).weak());
+                ui.label(RichText::new(lang.fmt(Msg::ExplainSource, &[("text", full.source(lang))])).weak());
                 ui.label(lang.fmt(Msg::ExplainCost, &[("text", full.cost(lang))]));
                 if let Some(how) = full.instructions(lang) {
                     ui.label(lang.fmt(Msg::ExplainHow, &[("text", how)]));
