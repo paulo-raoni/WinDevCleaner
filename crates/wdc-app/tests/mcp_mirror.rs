@@ -227,7 +227,11 @@ fn an_app_opened_after_the_client_started_gets_the_next_call() {
 
 /// An agent the person disconnected in the app gets errors from then on, and never a headless
 /// result: its results say `blocked` with the reason.
+///
+/// Ignored like its siblings: it needs the `wdc` binary, which only the workflow's dedicated step
+/// (`-- --ignored`) and `ci/guard-check.sh` (`--include-ignored`) build before running it.
 #[test]
+#[ignore]
 fn a_disconnected_agent_gets_errors_and_never_headless_results() {
     use std::sync::atomic::AtomicBool;
     use wdc_core::link::pipe::{accept, create_instance};

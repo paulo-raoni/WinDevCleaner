@@ -387,8 +387,14 @@ pub fn try_open(name: &str, access: u32) -> Result<(), u32> {
 /// Path to a binary built in the same target folder as the running test.
 pub fn target_bin(name: &str) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    // target\<profile>\deps\test.exe -> target\<profile>\<name>.exe
-    let dir = exe.parent().unwrap().parent().unwrap();
+    // The test executable is normally target\<profile>\deps\test.exe, but may sit deeper (for
+    // example under target\<profile>\build\): walk up to the folder that holds `deps`, the
+    // profile folder, where the binaries are.
+    let dir = exe
+        .ancestors()
+        .skip(1)
+        .find(|d| d.join("deps").is_dir())
+        .unwrap_or_else(|| exe.parent().unwrap().parent().unwrap());
     let p = dir.join(format!("{name}.exe"));
     assert!(p.exists(), "{} is not built; run `cargo build` for the workspace first", p.display());
     p
