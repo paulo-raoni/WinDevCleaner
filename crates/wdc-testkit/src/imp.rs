@@ -384,20 +384,15 @@ pub fn try_open(name: &str, access: u32) -> Result<(), u32> {
     }
 }
 
-/// Path to a binary built in the same target folder as the running test.
+/// Path to a binary built in the same target folder as the running test: the first
+/// `<ancestor>\<name>.exe` of the test executable that exists, whether cargo put the test
+/// under `deps\` or under `build\<package>\<hash>\out\`.
 pub fn target_bin(name: &str) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    // The test executable is normally target\<profile>\deps\test.exe, but may sit deeper (for
-    // example under target\<profile>\build\): walk up to the folder that holds `deps`, the
-    // profile folder, where the binaries are.
-    let dir = exe
-        .ancestors()
-        .skip(1)
-        .find(|d| d.join("deps").is_dir())
-        .unwrap_or_else(|| exe.parent().unwrap().parent().unwrap());
-    let p = dir.join(format!("{name}.exe"));
-    assert!(p.exists(), "{} is not built; run `cargo build` for the workspace first", p.display());
-    p
+    match crate::find_in_ancestors(&exe, &format!("{name}.exe")) {
+        Ok(p) => p,
+        Err(first) => panic!("{} is not built; run `cargo build` for the workspace first", first.display()),
+    }
 }
 
 /// Waits until a named pipe has a listening instance, without connecting to it.
