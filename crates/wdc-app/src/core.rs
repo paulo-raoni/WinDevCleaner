@@ -550,7 +550,7 @@ impl AgentHandler for AppCore {
             tools::SYSTEM_ITEMS => {
                 let _background = wdc_core::background::ThreadBackground::enter();
                 let items = wdc_core::system::system_items();
-                let value = serde_json::json!({ "total_bytes": wdc_core::system::total(&items), "items": items });
+                let value = tools::system_items_value(&items);
                 {
                     let mut s = self.shared.lock().unwrap();
                     s.system = Some(Arc::new(items));

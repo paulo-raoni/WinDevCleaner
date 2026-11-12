@@ -102,6 +102,18 @@ fn partial_items_are_labelled_as_lower_bounds_in_both_languages() {
 }
 
 #[test]
+fn the_system_items_result_says_when_the_total_is_a_lower_bound() {
+    // The builder the headless server and the app both call.
+    let whole = item(Kind::CrashDumps, Some(2048), Status::Measured);
+    let partial = item(Kind::CrashDumps, Some(2048), Status::PartialNeedsAdmin);
+    let v = wdc_core::tools::system_items_value(&[whole.clone(), partial]);
+    assert_eq!(v["total_is_lower_bound"], true);
+    assert_eq!(v["total_bytes"], 4096);
+    assert_eq!(v["items"].as_array().map(|a| a.len()), Some(2));
+    assert_eq!(wdc_core::tools::system_items_value(&[whole])["total_is_lower_bound"], false);
+}
+
+#[test]
 fn hibernation_off_is_an_absent_item_with_its_reason() {
     let it = hibernation_off("C:\\hiberfil.sys".into());
     assert_eq!(it.kind, Kind::HibernationFile);

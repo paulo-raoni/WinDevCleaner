@@ -332,10 +332,14 @@ pub fn run_diff(data_dir: &Path, opts: crate::diff::DiffOptions) -> Result<crate
 
 /// `system_items`: space Windows manages, with the tool that manages each.
 pub fn run_system_items() -> Value {
-    let items = crate::system::system_items();
+    system_items_value(&crate::system::system_items())
+}
+
+/// The `system_items` result for a list already read; the headless server and the app share it.
+pub fn system_items_value(items: &[crate::system::SystemItem]) -> Value {
     json!({
-        "total_bytes": crate::system::total(&items),
-        "total_is_lower_bound": crate::system::total_is_lower_bound(&items),
+        "total_bytes": crate::system::total(items),
+        "total_is_lower_bound": crate::system::total_is_lower_bound(items),
         "items": items,
     })
 }
