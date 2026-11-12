@@ -379,6 +379,14 @@ fn an_item_with_an_unreadable_subfolder_is_partial_and_left_out_of_the_plan() {
     write_file(&denied.join("secret.bin"), MIB);
     write_file(&item.join("readable.bin"), 5000);
     deny_listing(&denied);
+    // The fixture's own precondition, not a guarded line: if the deny did not take effect in this
+    // process, a failure below is a fixture problem and not a product defect.
+    let listing = std::fs::read_dir(&denied).map(|_| ());
+    assert!(
+        listing.is_err(),
+        "FIXTURE: icacls reported success but this process can still list {}; the fixture could not deny access (not a product defect)",
+        denied.display()
+    );
 
     let ctx = temp_ctx(&base);
     let rules = wdc_core::rules::RuleSet::built_in();
