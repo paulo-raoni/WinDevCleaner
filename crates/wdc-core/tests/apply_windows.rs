@@ -111,20 +111,27 @@ fn on_its_own_volume_apply_frees_nothing_and_purge_frees_what_was_expected() {
     let c = ctx(&profile, &[]);
 
     let d = draft(&DraftOptions { paths: vec![s(&plain), s(&linked)], ..Default::default() }, &RuleSet::built_in(), &c, Some(&s(&data)), now());
-    assert_eq!(d.plan.items.len(), 2, "{:#?}", d.not_included);
-    let p_plain = d.plan.items.iter().find(|i| i.path.ends_with("CachedData")).unwrap().clone();
-    let p_linked = d.plan.items.iter().find(|i| i.path.ends_with("GPUCache")).unwrap().clone();
-    println!("plain: {} on disk, {} expected; linked: {} on disk, {} expected", p_plain.bytes_on_disk, p_plain.expected_freed_bytes, p_linked.bytes_on_disk, p_linked.expected_freed_bytes);
+    // The plain item is the only one planned; the hard-linked one frees nothing, so the draft leaves
+    // it out as `NothingToFree`.
+    assert_eq!(d.plan.items.len(), 1, "{:#?}", d.not_included);
+    let p_plain = d.plan.items[0].clone();
+    assert!(p_plain.path.ends_with("CachedData"), "{:#?}", d.plan.items);
+    let left_out = d.not_included.iter().find(|n| n.path.ends_with("GPUCache")).unwrap_or_else(|| panic!("{:#?}", d.not_included));
+    assert_eq!(left_out.why_not, vec![WhyNot::NothingToFree], "{left_out:#?}");
+    println!("plain: {} on disk, {} expected", p_plain.bytes_on_disk, p_plain.expected_freed_bytes);
     assert!(p_plain.expected_freed_bytes >= 24 * MIB);
-    assert_eq!(p_linked.expected_freed_bytes, 0, "the hard-linked file has a name outside: expected 0");
     let plain_tree = tree(&plain);
+    // The hard-linked item is still applied and purged, through a hand-written plan (expected 0).
+    let linked_plan = crafted(&linked, "vscode-caches");
 
-    // Apply: both move into W:\.wdc-quarantine (a rename cannot cross volumes); nothing is freed.
+    // Apply: the plain item, then the crafted hard-linked one, move into W:\.wdc-quarantine (a rename cannot cross volumes); nothing is freed.
     let before = vol.free_bytes();
     let r = apply_plan(&d.plan, &c, &data, false);
+    assert_eq!(r.moved, 1, "{:#?}", r.items);
+    let r_linked = apply_plan(&linked_plan, &c, &data, false);
     let after = vol.free_bytes();
-    println!("apply: free {before} -> {after}; engine: {:?}", r.volumes);
-    assert_eq!(r.moved, 2, "{:#?}", r.items);
+    println!("apply: free {before} -> {after}; engine: {:?} / {:?}", r.volumes, r_linked.volumes);
+    assert_eq!(r_linked.moved, 1, "{:#?}", r_linked.items);
     assert!(before.abs_diff(after) < MIB, "a rename frees nothing: {before} -> {after}");
     let held = quarantine::list(&data);
     for e in &held {
@@ -434,7 +441,7 @@ fn the_probe_time_on_ten_thousand_files_is_printed() {
         found
     );
     assert!(found.is_some(), "the Restart Manager answered");
-    assert_eq!(registered, wdc_core::fsops::PROBE_FILE_CAP + 1, "the item and the capped files");
+    assert_eq!(registered, wdc_core::fsops::PROBE_FILE_CAP, "only the capped files, not the folder itself");
     wdc_testkit::remove_tree(&base);
 }
 

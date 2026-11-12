@@ -69,7 +69,10 @@ impl WhyNot {
             WhyNot::Forbidden { forbid } => lang.fmt(Msg::WhyForbidden, &[("why", forbid.text(lang))]),
             WhyNot::NotFullyReadable => lang.t(Msg::WhyNotFullyReadable).into(),
             WhyNot::NothingToFree => lang.t(Msg::WhyNothingToFree).into(),
-            WhyNot::HeldOpen { holders } => lang.fmt(Msg::WhyHeldOpen, &[("holders", &holder_names(holders))]),
+            WhyNot::HeldOpen { holders } => {
+                let msg = if holders.len() == 1 { Msg::WhyHeldOpenOne } else { Msg::WhyHeldOpen };
+                lang.fmt(msg, &[("holders", &holder_names(holders))])
+            }
         }
     }
 }

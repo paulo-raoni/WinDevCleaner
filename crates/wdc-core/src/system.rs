@@ -184,10 +184,18 @@ pub fn system_items() -> Vec<SystemItem> {
             for (kind, name) in
                 [(Kind::PageFile, "pagefile.sys"), (Kind::SwapFile, "swapfile.sys"), (Kind::HibernationFile, "hiberfil.sys")]
             {
-                if let Some(it) = imp::root_file(kind, drive, name) {
-                    out.push(it);
-                } else if kind == Kind::HibernationFile && drive == imp::system_drive() {
-                    out.push(hibernation_off(format!("{drive}:\\{name}")));
+                match imp::root_file(kind, drive, name) {
+                    Ok(it) => out.push(it),
+                    // Hibernation is off only when the file is not there (file or path not found).
+                    Err(2 | 3) if kind == Kind::HibernationFile && drive == imp::system_drive() => {
+                        out.push(hibernation_off(format!("{drive}:\\{name}")));
+                    }
+                    // Any other failure on the hibernation file is an unreadable item, not "off".
+                    Err(code) if kind == Kind::HibernationFile && drive == imp::system_drive() => {
+                        let status = if code == 5 { Status::NeedsAdmin } else { Status::Error };
+                        out.push(item(kind, Some(format!("{drive}:\\{name}")), None, None, status));
+                    }
+                    Err(_) => {}
                 }
             }
         }
@@ -271,22 +279,23 @@ mod imp {
     }
 
     /// A file in a volume's root read from its directory entry (`FindFirstFileW`), without
-    /// opening it: the paging and hibernation files are always in use.
+    /// opening it: the paging and hibernation files are always in use. `Err` is the Windows error
+    /// code of the failed lookup (2 or 3: the file is not there).
     #[allow(unused_mut, unused_assignments)]
-    pub fn root_file(kind: Kind, drive: char, name: &str) -> Option<SystemItem> {
+    pub fn root_file(kind: Kind, drive: char, name: &str) -> Result<SystemItem, u32> {
         let path = format!("{drive}:\\{name}");
         let w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
         let mut d: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
         let h = unsafe { FindFirstFileW(w.as_ptr(), &mut d) };
         if h as isize == -1 {
-            return None;
+            return Err(crate::win::last_error());
         }
         unsafe { FindClose(h) };
         let mut bytes = 0u64;
         // GUARD-BEGIN(system-file-size)
         bytes = ((d.nFileSizeHigh as u64) << 32) | d.nFileSizeLow as u64;
         // GUARD-END(system-file-size)
-        Some(item(kind, Some(path), Some(bytes), Some(1), Status::Measured))
+        Ok(item(kind, Some(path), Some(bytes), Some(1), Status::Measured))
     }
 }
 

@@ -710,6 +710,42 @@ fn the_reason_codes_of_the_two_new_exclusions_are_stable() {
     }
 }
 
+/// An item that is both incomplete and 0 bytes is left out as not-fully-readable: its size is
+/// unknown, so "nothing to free" would state a size nobody measured. The cloud session runs as
+/// root and cannot make a portable item with an unreadable part, so the decision `draft` takes is
+/// tested where it is made, with the two facts given directly.
+#[test]
+fn an_incomplete_item_that_also_frees_nothing_is_left_out_as_not_fully_readable() {
+    use wdc_core::explain::WhyNot;
+    use wdc_core::plan::left_out_for_size;
+    assert_eq!(left_out_for_size(false, 0), Some(WhyNot::NotFullyReadable), "incomplete and 0 bytes: the incomplete reason wins");
+    assert_eq!(left_out_for_size(false, 4096), Some(WhyNot::NotFullyReadable));
+    assert_eq!(left_out_for_size(true, 0), Some(WhyNot::NothingToFree));
+    assert_eq!(left_out_for_size(true, 4096), None);
+}
+
+/// The Restart Manager may reject a directory, which would make every folder probe fail: a
+/// folder registers only its files (within the cap), a file registers itself.
+#[test]
+fn the_holder_probe_registers_a_file_itself_and_a_folder_only_through_its_files() {
+    let base = fresh_dir("probe-files");
+    let folder = base.join("cache");
+    std::fs::create_dir_all(folder.join("sub")).unwrap();
+    for (i, d) in [&folder, &folder.join("sub")].into_iter().enumerate() {
+        for f in 0..3 {
+            std::fs::write(d.join(format!("f{i}{f}.bin")), b"x").unwrap();
+        }
+    }
+    let all = wdc_core::fsops::probe_files(&folder, 100);
+    assert_eq!(all.len(), 6, "{all:?}");
+    assert!(!all.contains(&folder) && all.iter().all(|p| p.is_file()), "{all:?}");
+    assert_eq!(wdc_core::fsops::probe_files(&folder, 4).len(), 4, "capped");
+    let one = folder.join("f00.bin");
+    assert_eq!(wdc_core::fsops::probe_files(&one, 4), vec![one.clone()]);
+    assert!(wdc_core::fsops::probe_files(&base.join("missing"), 4).is_empty());
+    wdc_testkit::remove_tree(&base);
+}
+
 // ---- items another program holds open, and folders with recent content (rc.2, task 2) ----
 
 fn fake_holders() -> Vec<wdc_core::fsops::Holder> {
@@ -754,6 +790,11 @@ fn a_cache_folder_another_program_holds_open_is_left_out_naming_the_holders() {
     assert_eq!(serde_json::to_value(&why[0]).unwrap()["holders"][0]["pid"], 4242);
     assert_eq!(why[0].text(Lang::En), "held open by: NVIDIA Container, NVIDIA Overlay. Close them and draft again.");
     assert_eq!(why[0].text(Lang::PtBr), "mantido aberto por: NVIDIA Container, NVIDIA Overlay. Feche-os e gere o plano de novo.");
+    // One holder: the singular.
+    let one = vec![wdc_core::fsops::Holder { pid: 7, name: "NVIDIA Container".into() }];
+    let one = WhyNot::HeldOpen { holders: one };
+    assert_eq!(one.text(Lang::En), "held open by: NVIDIA Container. Close it and draft again.");
+    assert_eq!(one.text(Lang::PtBr), "mantido aberto por: NVIDIA Container. Feche-o e gere o plano de novo.");
     wdc_testkit::remove_tree(&f.base);
 }
 

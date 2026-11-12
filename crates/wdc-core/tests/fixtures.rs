@@ -370,7 +370,10 @@ fn a_file_item_with_a_second_name_outside_it_frees_nothing() {
 #[test]
 fn an_item_with_an_unreadable_subfolder_is_partial_and_left_out_of_the_plan() {
     let base = fresh_dir("partial-item");
-    let item = temp_of(&base).join("old-build-output");
+    // A quarantine rule with no `older-than` condition: that condition fails closed on an
+    // unreadable folder, which would leave the item out as `ConditionNotMet`; here the item is left
+    // out only for being incomplete.
+    let item = base.join("AppData").join("Local").join("NVIDIA").join("DXCache");
     let denied = item.join("denied");
     std::fs::create_dir_all(&denied).unwrap();
     write_file(&denied.join("secret.bin"), MIB);
@@ -387,6 +390,7 @@ fn an_item_with_an_unreadable_subfolder_is_partial_and_left_out_of_the_plan() {
     let d = wdc_core::plan::draft(&opts, &rules, &ctx, Some(&data.to_string_lossy()), now);
     allow_listing(&denied);
 
+    guard_assert!("explain-complete", !e.complete, "an unreadable subfolder makes the size incomplete");
     assert!(e.bytes_on_disk > 0, "the readable part is still measured");
     assert!(e.errors >= 1, "{e:?}");
     assert_eq!(e.first_error_kind, Some("access-denied"));
@@ -394,8 +398,7 @@ fn an_item_with_an_unreadable_subfolder_is_partial_and_left_out_of_the_plan() {
     let json = serde_json::to_value(&e).unwrap();
     assert_eq!(json["complete"], false);
     assert_eq!(json["first_error_kind"], "access-denied");
-    guard_assert!("explain-complete", !e.complete, "an unreadable subfolder makes the size incomplete");
-    let left_out = d.not_included.iter().find(|n| n.path.ends_with("old-build-output"));
+    let left_out = d.not_included.iter().find(|n| n.path.ends_with("DXCache"));
     guard_assert!(
         "plan-complete",
         d.plan.items.is_empty() && left_out.is_some(),

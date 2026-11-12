@@ -263,7 +263,7 @@ fn a_disconnected_agent_gets_errors_and_never_headless_results() {
     let init = mcp.initialize("wdc-disconnect-client");
     assert!(init["instructions"].as_str().unwrap().contains("watches every call live"), "{init}");
     let r = mcp.call("quarantine", serde_json::json!({}));
-    assert_eq!(r["structuredContent"]["app"], "connected", "{r}");
+    guard_assert!("mcp-app-field", r["structuredContent"]["app"] == "connected", "{r}");
 
     control.disconnect();
     for _ in 0..3 {

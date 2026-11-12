@@ -526,6 +526,9 @@ messages! {
     WhyHeldOpen =>
         "held open by: {holders}. Close them and draft again.",
         "mantido aberto por: {holders}. Feche-os e gere o plano de novo.";
+    WhyHeldOpenOne =>
+        "held open by: {holders}. Close it and draft again.",
+        "mantido aberto por: {holders}. Feche-o e gere o plano de novo.";
     ClassRegenerableCache =>
         "regenerable cache",
         "cache regenerável";

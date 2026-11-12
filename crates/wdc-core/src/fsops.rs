@@ -86,12 +86,17 @@ impl Default for HolderProbe {
     }
 }
 
-/// The item itself, then (for a folder) its files, breadth first, links never followed, at most
-/// `cap` files. Unreadable parts are skipped: the probe is best effort.
+/// What to register with the Restart Manager for an item: the item itself when it is a regular
+/// file; for a folder, only its files (the Restart Manager may reject a directory, and then no
+/// folder could ever be probed), breadth first, links never followed, at most `cap` files.
+/// Unreadable parts are skipped: the probe is best effort.
 pub fn probe_files(root: &Path, cap: usize) -> Vec<std::path::PathBuf> {
-    let mut out = vec![root.to_path_buf()];
-    let is_dir = std::fs::symlink_metadata(root).map(|m| m.is_dir()).unwrap_or(false);
-    if !is_dir {
+    let Ok(meta) = std::fs::symlink_metadata(root) else { return Vec::new() };
+    if meta.is_file() {
+        return vec![root.to_path_buf()];
+    }
+    let mut out = Vec::new();
+    if !meta.is_dir() {
         return out;
     }
     let mut files = 0usize;
