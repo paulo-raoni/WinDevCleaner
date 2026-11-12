@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>WinDevCleaner</title>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#1d3557"/>
+  <circle cx="128" cy="128" r="88" fill="#f1faee"/>
+  <path d="M128 128 L128 40 A88 88 0 0 1 216 128 Z" fill="#f4a31b"/>
+  <circle cx="128" cy="128" r="20" fill="#1d3557"/>
+  <polygon points="190,32 198,58 224,66 198,74 190,100 182,74 156,66 182,58" fill="#f1faee"/>
+</svg>

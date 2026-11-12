@@ -5,7 +5,8 @@ param([Parameter(Mandatory = $true)][string]$Msi, [Parameter(Mandatory = $true)]
 $ErrorActionPreference = 'Stop'
 
 $msi = (Resolve-Path $Msi).Path
-$log = Join-Path (Split-Path $msi) 'msi-install.log'
+# The log goes to the runner's temp folder, never next to the MSI (a release uploads that folder).
+$log = Join-Path ([IO.Path]::GetTempPath()) 'msi-install.log'
 $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/l*v', "`"$log`"") -Wait -PassThru
 if ($p.ExitCode -ne 0) { Get-Content $log -Tail 40; throw "install failed with exit code $($p.ExitCode)" }
 

@@ -4,6 +4,17 @@ All notable changes to WinDevCleaner are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- An icon for `WinDevCleaner.exe` and `wdc.exe` (Explorer, Start menu, taskbar), for the app window, for the Start menu shortcut and for the entry in Settings > Apps.
+- The installer shows the MIT licence and a finish page that says where WinDevCleaner was installed and that `wdc` works in any new terminal, with an "Open WinDevCleaner now" option (checked by default). Silent installs (`/qn`) still show nothing.
+
+### Fixed
+
+- The release no longer carries the install log and the `.wixpdb`.
+
 ## [1.0.0-rc.1] - 2026-11-11
 
 The tool as delivered by the rebuild. A pre-release: it has not yet been used on a real machine.

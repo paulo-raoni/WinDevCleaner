@@ -66,12 +66,13 @@ jobs:
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           "WDC_VERSION=$version" >> $env:GITHUB_ENV
           # An MSI version is numbers only (1.0.0-rc.1 builds as 1.0.0).
           $msiVersion = $version -replace '[-+].*$', ''
           New-Item -ItemType Directory -Force ci-out | Out-Null
-          wix build installer\WinDevCleaner.wxs -arch x64 -d Version=$msiVersion -d BinDir=target\release -o ci-out\WinDevCleaner.msi
+          wix build installer\WinDevCleaner.wxs -arch x64 -ext WixToolset.UI.wixext -pdbtype none -d Version=$msiVersion -d BinDir=target\release -o ci-out\WinDevCleaner.msi
       - name: Install, run and uninstall the MSI
         shell: pwsh
         run: ci\msi-check.ps1 -Msi ci-out\WinDevCleaner.msi -Version $env:WDC_VERSION

@@ -16,6 +16,11 @@ use wdc_core::i18n::Lang;
 
 const MIB: u64 = 1024 * 1024;
 
+/// The window and taskbar icon (the same drawing as the executable's resource icon).
+fn window_icon() -> eframe::egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon-256.png")).unwrap_or_default()
+}
+
 fn main() -> eframe::Result {
     let mut lang = Lang::detect();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -35,7 +40,8 @@ fn main() -> eframe::Result {
             .with_title("WinDevCleaner")
             .with_app_id("WinDevCleaner")
             .with_inner_size([1120.0, 720.0])
-            .with_min_inner_size([640.0, 400.0]),
+            .with_min_inner_size([640.0, 400.0])
+            .with_icon(window_icon()),
         ..Default::default()
     };
     // The integrated GPU (or Windows' software renderer) is plenty for this window; never
