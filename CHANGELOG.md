@@ -14,6 +14,9 @@ All notable changes to WinDevCleaner are listed here. The format follows
 ### Fixed
 
 - The release no longer carries the install log and the `.wixpdb`.
+- `explain`, `plan` and the approval card now show the real size of a file (a 541 MB `update.exe` showed 0 B), and a file with another name outside the item still counts as freeing nothing.
+- `explain` says when a size is partial ("N items could not be read") and `--json` carries `errors`, `complete` and `first_error_kind`, instead of showing a folder it could not read as 0.
+- `plan` no longer offers an item whose size is incomplete or an item that would free 0 bytes; both are listed under "left out" with their own reason.
 
 ## [1.0.0-rc.1] - 2026-11-11
 

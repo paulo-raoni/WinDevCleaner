@@ -449,7 +449,7 @@ impl<'a> Collector<'a> {
     }
 }
 
-fn error_kind(code: u32) -> &'static str {
+pub(crate) fn error_kind(code: u32) -> &'static str {
     #[cfg(windows)]
     {
         match code {

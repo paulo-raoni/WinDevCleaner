@@ -606,3 +606,106 @@ fn early_purge_follows_the_class_of_every_quarantine_rule() {
         wdc_testkit::remove_tree(&f.base);
     }
 }
+
+// ---- the true size of every item, and a size that is incomplete (rc.2, task 1) ----
+
+/// A fake user under `base`, with the clock far enough ahead for `temp-old` (older than 7 days).
+fn temp_ctx(base: &Path) -> Context {
+    let mut c = ctx_for(base);
+    c.now = std::time::SystemTime::now() + std::time::Duration::from_secs(9 * 86_400);
+    c
+}
+
+fn temp_dir(base: &Path) -> PathBuf {
+    let t = local(base).join("Temp");
+    std::fs::create_dir_all(&t).unwrap();
+    t
+}
+
+fn draft_of(base: &Path, item: &Path) -> wdc_core::plan::Draft {
+    let data = base.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let opts = DraftOptions { paths: vec![item.to_string_lossy().into_owned()], ..Default::default() };
+    draft(&opts, &RuleSet::built_in(), &temp_ctx(base), Some(&data.to_string_lossy()), now())
+}
+
+#[test]
+fn explain_of_a_file_reports_its_allocation_and_one_file() {
+    let base = fresh_dir("file-explain");
+    let file = temp_dir(&base).join("update.bin");
+    write(&file, 24_576);
+    let e = wdc_core::explain::explain(&file.to_string_lossy(), &RuleSet::built_in(), &temp_ctx(&base), None);
+    assert_eq!(e.kind, "file");
+    guard_assert!("file-root-size", e.bytes_on_disk >= 24_576, "the file's allocation is reported, got {}", e.bytes_on_disk);
+    assert_eq!(e.logical_bytes, 24_576);
+    assert_eq!(e.files, 1);
+    assert!(e.complete && e.errors == 0 && e.first_error_kind.is_none());
+    let json = serde_json::to_value(&e).unwrap();
+    assert!(json["bytes_on_disk"].as_u64().unwrap() > 0);
+    assert_eq!(json["files"], 1);
+    assert_eq!(json["complete"], true);
+    assert!(json.get("first_error_kind").is_none(), "absent when complete");
+    assert!(e.size_line(wdc_core::i18n::Lang::En).ends_with("in 1 file."), "{}", e.size_line(wdc_core::i18n::Lang::En));
+    assert!(e.size_line(wdc_core::i18n::Lang::PtBr).ends_with("em 1 arquivo."));
+    assert!(e.partial_line(wdc_core::i18n::Lang::En).is_none());
+    wdc_testkit::remove_tree(&base);
+}
+
+#[test]
+fn a_temp_old_file_item_goes_through_the_plan_with_its_real_size() {
+    let base = fresh_dir("file-plan");
+    let file = temp_dir(&base).join("update.exe");
+    write(&file, 24_576);
+    let d = draft_of(&base, &file);
+    let offered = d.plan.items.first().map_or(0, |i| i.bytes_on_disk);
+    guard_assert!("file-root-size", offered >= 24_576, "the plan offers the file with its size, got {offered}: {:#?}", d.not_included);
+    assert_eq!(d.plan.items.len(), 1, "{:#?}", d.not_included);
+    let i = &d.plan.items[0];
+    assert_eq!(i.rule_id, "temp-old");
+    assert!(!i.is_dir);
+    assert_eq!(i.expected_freed_bytes, i.bytes_on_disk);
+    assert_eq!(i.files, 1);
+    assert_eq!(d.plan.bytes_on_disk(), i.bytes_on_disk);
+    wdc_testkit::remove_tree(&base);
+}
+
+#[test]
+fn a_file_with_a_second_name_outside_the_item_reports_expected_freed_zero() {
+    let base = fresh_dir("file-linked");
+    let file = temp_dir(&base).join("shared.bin");
+    write(&file, 8192);
+    let other = base.join("elsewhere").join("shared-too.bin");
+    std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+    std::fs::hard_link(&file, &other).unwrap();
+    let e = wdc_core::explain::explain(&file.to_string_lossy(), &RuleSet::built_in(), &temp_ctx(&base), None);
+    assert!(e.bytes_on_disk >= 8192, "the file is measured: {}", e.bytes_on_disk);
+    assert_eq!(e.hard_links.len(), 1, "{:#?}", e.hard_links);
+    guard_assert_eq!("expected-freed", e.expected_freed_bytes, 0, "the file frees nothing while its other name exists");
+    wdc_testkit::remove_tree(&base);
+}
+
+#[test]
+fn a_zero_byte_item_is_left_out_as_nothing_to_free() {
+    let base = fresh_dir("zero");
+    let file = temp_dir(&base).join("empty.tmp");
+    write(&file, 0);
+    let d = draft_of(&base, &file);
+    let left_out = d.not_included.iter().find(|n| n.path.ends_with("empty.tmp"));
+    guard_assert!("plan-nothing", d.plan.items.is_empty() && left_out.is_some(), "the 0-byte item is not offered: {:#?}", d.plan.items);
+    let why = &left_out.unwrap().why_not;
+    assert_eq!(why, &vec![wdc_core::explain::WhyNot::NothingToFree]);
+    assert_eq!(serde_json::to_value(&why[0]).unwrap()["reason"], "nothing-to-free");
+    let (en, pt) = (why[0].text(wdc_core::i18n::Lang::En), why[0].text(wdc_core::i18n::Lang::PtBr));
+    assert!(!en.is_empty() && !pt.is_empty() && en != pt);
+    wdc_testkit::remove_tree(&base);
+}
+
+#[test]
+fn the_reason_codes_of_the_two_new_exclusions_are_stable() {
+    use wdc_core::explain::WhyNot;
+    assert_eq!(serde_json::to_value(WhyNot::NotFullyReadable).unwrap()["reason"], "not-fully-readable");
+    assert_eq!(serde_json::to_value(WhyNot::NothingToFree).unwrap()["reason"], "nothing-to-free");
+    for w in [WhyNot::NotFullyReadable, WhyNot::NothingToFree] {
+        assert_ne!(w.text(wdc_core::i18n::Lang::En), w.text(wdc_core::i18n::Lang::PtBr));
+    }
+}

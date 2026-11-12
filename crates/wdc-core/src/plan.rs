@@ -305,6 +305,20 @@ pub fn draft(opts: &DraftOptions, rules: &RuleSet, ctx: &Context, data_dir: Opti
             not_included.push(NotIncluded { path: e.item.clone(), rule_id, why_not: e.why_not.clone() });
             continue;
         }
+        // An incomplete size is not a size the person can approve.
+        // GUARD-BEGIN(plan-complete)
+        if !e.complete {
+            not_included.push(NotIncluded { path: e.item.clone(), rule_id, why_not: vec![WhyNot::NotFullyReadable] });
+            continue;
+        }
+        // GUARD-END(plan-complete)
+        // An item that frees nothing still costs a proof of presence and quarantine churn.
+        // GUARD-BEGIN(plan-nothing)
+        if e.expected_freed_bytes == 0 {
+            not_included.push(NotIncluded { path: e.item.clone(), rule_id, why_not: vec![WhyNot::NothingToFree] });
+            continue;
+        }
+        // GUARD-END(plan-nothing)
         let r = e.rule.as_ref().expect("an actionable item has a rule");
         let item_path = e.final_path.clone().unwrap_or_else(|| e.item.clone());
         let Some(file_id) = crate::fsops::file_id(&native(&item_path)) else {

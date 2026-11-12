@@ -309,3 +309,99 @@ fn long_and_unicode_paths_are_measured() {
     assert!(r.top_files[0].path.ends_with("file-naïve-ü.bin"));
     remove_tree(&base);
 }
+
+// ---- explain and plan: the true size of every item (rc.2, task 1) ----
+
+/// A fake user under `base`, whose Temp folder is `base\Temp`, with the clock far enough ahead
+/// for the `temp-old` rule (older than 7 days).
+fn temp_ctx(base: &Path) -> wdc_core::rules::Context {
+    let s = |p: PathBuf| p.to_string_lossy().into_owned();
+    let env: std::collections::HashMap<String, String> = [
+        ("USERPROFILE", s(base.to_path_buf())),
+        ("APPDATA", s(base.join("AppData").join("Roaming"))),
+        ("LOCALAPPDATA", s(base.join("AppData").join("Local"))),
+        ("TEMP", s(base.join("AppData").join("Local").join("Temp"))),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    let mut c = wdc_core::rules::Context::new(env, Some(Default::default()), None);
+    c.now = std::time::SystemTime::now() + std::time::Duration::from_secs(9 * 86_400);
+    c
+}
+
+fn temp_of(base: &Path) -> PathBuf {
+    let t = base.join("AppData").join("Local").join("Temp");
+    std::fs::create_dir_all(&t).unwrap();
+    t
+}
+
+#[test]
+fn a_file_item_reports_its_allocation_and_one_file() {
+    let base = fresh_dir("file-item");
+    let f = temp_of(&base).join("update.exe");
+    write_file(&f, 24_576);
+    let truth = facts_by_handle(&f);
+    let e = wdc_core::explain::explain(&f.to_string_lossy(), &wdc_core::rules::RuleSet::built_in(), &temp_ctx(&base), None);
+    assert!(truth.allocation >= 24_576);
+    guard_assert_eq!("file-root-size", e.bytes_on_disk, truth.allocation, "a file item reports its allocation, not 0");
+    assert_eq!(e.logical_bytes, 24_576);
+    assert_eq!(e.files, 1);
+    assert!(e.complete, "{e:?}");
+    remove_tree(&base);
+}
+
+#[test]
+fn a_file_item_with_a_second_name_outside_it_frees_nothing() {
+    let base = fresh_dir("file-item-linked");
+    let f = temp_of(&base).join("shared.bin");
+    write_file(&f, 70 * MIB);
+    let other = base.join("elsewhere.bin");
+    std::fs::hard_link(&f, &other).unwrap();
+    let truth = facts_by_handle(&f);
+    let e = wdc_core::explain::explain(&f.to_string_lossy(), &wdc_core::rules::RuleSet::built_in(), &temp_ctx(&base), None);
+    assert_eq!(e.bytes_on_disk, truth.allocation);
+    assert_eq!(e.hard_links.len(), 1, "{:#?}", e.hard_links);
+    assert_eq!(e.hard_links[0].names_outside.len(), 1, "{:#?}", e.hard_links);
+    guard_assert_eq!("expected-freed", e.expected_freed_bytes, 0, "the file frees nothing while its other name exists");
+    remove_tree(&base);
+}
+
+#[test]
+fn an_item_with_an_unreadable_subfolder_is_partial_and_left_out_of_the_plan() {
+    let base = fresh_dir("partial-item");
+    let item = temp_of(&base).join("old-build-output");
+    let denied = item.join("denied");
+    std::fs::create_dir_all(&denied).unwrap();
+    write_file(&denied.join("secret.bin"), MIB);
+    write_file(&item.join("readable.bin"), 5000);
+    deny_listing(&denied);
+
+    let ctx = temp_ctx(&base);
+    let rules = wdc_core::rules::RuleSet::built_in();
+    let e = wdc_core::explain::explain(&item.to_string_lossy(), &rules, &ctx, None);
+    let data = base.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let opts = wdc_core::plan::DraftOptions { paths: vec![item.to_string_lossy().into_owned()], ..Default::default() };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let d = wdc_core::plan::draft(&opts, &rules, &ctx, Some(&data.to_string_lossy()), now);
+    allow_listing(&denied);
+
+    assert!(e.bytes_on_disk > 0, "the readable part is still measured");
+    assert!(e.errors >= 1, "{e:?}");
+    assert_eq!(e.first_error_kind, Some("access-denied"));
+    assert!(e.partial_line(wdc_core::i18n::Lang::En).unwrap().starts_with("Partial: "));
+    let json = serde_json::to_value(&e).unwrap();
+    assert_eq!(json["complete"], false);
+    assert_eq!(json["first_error_kind"], "access-denied");
+    guard_assert!("explain-complete", !e.complete, "an unreadable subfolder makes the size incomplete");
+    let left_out = d.not_included.iter().find(|n| n.path.ends_with("old-build-output"));
+    guard_assert!(
+        "plan-complete",
+        d.plan.items.is_empty() && left_out.is_some(),
+        "an incomplete item is not offered: {:#?}",
+        d.plan.items
+    );
+    assert_eq!(left_out.unwrap().why_not, vec![wdc_core::explain::WhyNot::NotFullyReadable]);
+    remove_tree(&base);
+}

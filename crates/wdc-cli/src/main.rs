@@ -524,10 +524,10 @@ pub fn print_explanation(lang: Lang, e: &wdc_core::explain::Explanation) {
         println!("  {}", lang.fmt(Msg::ExplainInside, &[("path", &e.path)]));
     }
     if e.exists {
-        println!(
-            "  {}",
-            lang.fmt(Msg::ExplainSize, &[("size", &fmt::bytes(e.bytes_on_disk)), ("files", &fmt::count(e.files))])
-        );
+        println!("  {}", e.size_line(lang));
+        if let Some(partial) = e.partial_line(lang) {
+            println!("  {partial}");
+        }
         println!("  {}", lang.fmt(Msg::ExplainFreed, &[("size", &fmt::bytes(e.expected_freed_bytes))]));
     }
     for h in &e.hard_links {

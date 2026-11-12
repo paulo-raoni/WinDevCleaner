@@ -528,7 +528,10 @@ fn explain_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
         });
         ui.label(RichText::new(lang.fmt(Msg::ExplainItem, &[("item", &e.item), ("kind", kind)])).strong().monospace());
         if e.exists {
-            ui.label(lang.fmt(Msg::ExplainSize, &[("size", &fmt::bytes(e.bytes_on_disk)), ("files", &fmt::count(e.files))]));
+            ui.label(e.size_line(lang));
+            if let Some(partial) = e.partial_line(lang) {
+                ui.label(RichText::new(partial).color(ORANGE));
+            }
             ui.label(RichText::new(lang.fmt(Msg::ExplainFreed, &[("size", &fmt::bytes(e.expected_freed_bytes))])).strong());
         }
         for h in &e.hard_links {

@@ -505,6 +505,12 @@ messages! {
     WhyForbidden =>
         "forbidden: {why}",
         "proibido: {why}";
+    WhyNotFullyReadable =>
+        "its size is incomplete: some of it could not be read",
+        "o tamanho está incompleto: parte dele não pôde ser lida";
+    WhyNothingToFree =>
+        "deleting it would free nothing",
+        "apagar não liberaria nada";
     ClassRegenerableCache =>
         "regenerable cache",
         "cache regenerável";
@@ -547,6 +553,15 @@ messages! {
     ExplainSize =>
         "Size on disk: {size} in {files} files.",
         "Tamanho em disco: {size} em {files} arquivos.";
+    ExplainSizeOne =>
+        "Size on disk: {size} in 1 file.",
+        "Tamanho em disco: {size} em 1 arquivo.";
+    ExplainPartial =>
+        "Partial: {n} items could not be read, so the real size may be larger.",
+        "Parcial: {n} itens não puderam ser lidos, então o tamanho real pode ser maior.";
+    ExplainPartialOne =>
+        "Partial: 1 item could not be read, so the real size may be larger.",
+        "Parcial: 1 item não pôde ser lido, então o tamanho real pode ser maior.";
     ExplainFreed =>
         "Deleting it would free: {size}.",
         "Apagar liberaria: {size}.";
