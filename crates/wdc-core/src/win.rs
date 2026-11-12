@@ -270,3 +270,68 @@ pub fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
         Some(PathBuf::from(out))
     }
 }
+
+/// The programs that hold any of `files` open, through the Restart Manager (read-only: nothing
+/// is shut down or restarted). This process is left out: during apply it holds the item's own
+/// handle. `None` when the Restart Manager could not be used.
+pub fn restart_manager_holders(files: &[PathBuf]) -> Option<Vec<crate::fsops::Holder>> {
+    use windows_sys::Win32::System::RestartManager::{
+        RmEndSession, RmGetList, RmRegisterResources, RmStartSession, CCH_RM_SESSION_KEY, RM_PROCESS_INFO,
+    };
+    const ERROR_SUCCESS: u32 = 0;
+    const ERROR_MORE_DATA: u32 = 234;
+    let mut session = 0u32;
+    let mut key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
+    if unsafe { RmStartSession(&mut session, 0, key.as_mut_ptr()) } != ERROR_SUCCESS {
+        return None;
+    }
+    let result = (|| {
+        // Registered in batches; the wide strings live until the end of each call.
+        for batch in files.chunks(256) {
+            let wide: Vec<Vec<u16>> = batch.iter().map(|p| wide_path(p)).collect();
+            let ptrs: Vec<*const u16> = wide.iter().map(|w| w.as_ptr()).collect();
+            let rc = unsafe { RmRegisterResources(session, ptrs.len() as u32, ptrs.as_ptr(), 0, std::ptr::null(), 0, std::ptr::null()) };
+            if rc != ERROR_SUCCESS {
+                return None;
+            }
+        }
+        let (mut needed, mut have, mut reasons) = (0u32, 0u32, 0u32);
+        let rc = unsafe { RmGetList(session, &mut needed, &mut have, std::ptr::null_mut(), &mut reasons) };
+        if rc == ERROR_SUCCESS && needed == 0 {
+            return Some(Vec::new());
+        }
+        if rc != ERROR_MORE_DATA {
+            return None;
+        }
+        // The list can grow between the two calls: ask again a few times.
+        let mut infos: Vec<RM_PROCESS_INFO> = Vec::new();
+        let mut done = false;
+        for _ in 0..4 {
+            infos = vec![unsafe { std::mem::zeroed() }; needed as usize + 4];
+            have = infos.len() as u32;
+            match unsafe { RmGetList(session, &mut needed, &mut have, infos.as_mut_ptr(), &mut reasons) } {
+                ERROR_SUCCESS => {
+                    infos.truncate(have as usize);
+                    done = true;
+                    break;
+                }
+                ERROR_MORE_DATA => {}
+                _ => return None,
+            }
+        }
+        if !done {
+            return None;
+        }
+        let own = std::process::id();
+        let mut out: Vec<crate::fsops::Holder> = Vec::new();
+        for i in infos.iter().filter(|i| i.Process.dwProcessId != own) {
+            let n = i.strAppName.iter().position(|&c| c == 0).unwrap_or(i.strAppName.len());
+            if !out.iter().any(|h| h.pid == i.Process.dwProcessId) {
+                out.push(crate::fsops::Holder { pid: i.Process.dwProcessId, name: from_wide(&i.strAppName[..n]) });
+            }
+        }
+        Some(out)
+    })();
+    unsafe { RmEndSession(session) };
+    result
+}

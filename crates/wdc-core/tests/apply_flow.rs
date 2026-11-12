@@ -709,3 +709,134 @@ fn the_reason_codes_of_the_two_new_exclusions_are_stable() {
         assert_ne!(w.text(wdc_core::i18n::Lang::En), w.text(wdc_core::i18n::Lang::PtBr));
     }
 }
+
+// ---- items another program holds open, and folders with recent content (rc.2, task 2) ----
+
+fn fake_holders() -> Vec<wdc_core::fsops::Holder> {
+    vec![
+        wdc_core::fsops::Holder { pid: 4242, name: "NVIDIA Container".into() },
+        wdc_core::fsops::Holder { pid: 4343, name: "NVIDIA Overlay".into() },
+    ]
+}
+
+#[test]
+fn a_cache_folder_another_program_holds_open_is_left_out_naming_the_holders() {
+    use wdc_core::explain::WhyNot;
+    use wdc_core::fsops::HolderProbe;
+    use wdc_core::i18n::Lang;
+    let f = fixture("flow-held-plan");
+    let rules = RuleSet::built_in();
+    let data = f.data.to_string_lossy().into_owned();
+    let draft_with = |probe: HolderProbe| {
+        let opts = DraftOptions { paths: vec![f.cache.to_string_lossy().into_owned()], holders: probe, ..Default::default() };
+        draft(&opts, &rules, &f.ctx, Some(&data), now())
+    };
+
+    // Controls that do not depend on the exclusion: nobody holds it, or the probe itself fails.
+    let free = draft_with(HolderProbe::new(|_| Some(Vec::new())));
+    assert_eq!(free.plan.items.len(), 1, "nobody holds it: {:#?}", free.not_included);
+    let failed = draft_with(HolderProbe::new(|_| None));
+    assert_eq!(failed.plan.items.len(), 1, "a probe that fails keeps the item: {:#?}", failed.not_included);
+    assert!(failed.not_included.is_empty(), "and says nothing: {:#?}", failed.not_included);
+
+    // Held by two programs.
+    let held = draft_with(HolderProbe::new(|_| Some(fake_holders())));
+    let why = held.not_included.iter().find(|n| n.path.ends_with("CachedData")).map(|n| n.why_not.clone());
+    guard_assert!(
+        "plan-held",
+        held.plan.items.is_empty() && why == Some(vec![WhyNot::HeldOpen { holders: fake_holders() }]),
+        "a held folder is left out as held-open with its holders: items {:?}, left out {:#?}",
+        held.plan.items.len(),
+        held.not_included
+    );
+    let why = why.unwrap();
+    assert_eq!(serde_json::to_value(&why[0]).unwrap()["reason"], "held-open");
+    assert_eq!(serde_json::to_value(&why[0]).unwrap()["holders"][0]["pid"], 4242);
+    assert_eq!(why[0].text(Lang::En), "held open by: NVIDIA Container, NVIDIA Overlay. Close them and draft again.");
+    assert_eq!(why[0].text(Lang::PtBr), "mantido aberto por: NVIDIA Container, NVIDIA Overlay. Feche-os e gere o plano de novo.");
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn held_open_and_open_failed_skips_read_in_both_languages_and_stay_distinct_in_json() {
+    use wdc_core::fsops::OpError;
+    use wdc_core::i18n::Lang;
+    let held = Skip::HeldOpen { stage: "rename", error: OpError::from_code(5), holders: fake_holders() };
+    assert_eq!(held.text(Lang::En), "held open by NVIDIA Container, NVIDIA Overlay; close them and run again");
+    let one = Skip::HeldOpen { stage: "open", error: OpError::from_code(32), holders: fake_holders()[..1].to_vec() };
+    assert_eq!(one.text(Lang::En), "held open by NVIDIA Container; close it and run again");
+    assert_eq!(one.text(Lang::PtBr), "mantido aberto por NVIDIA Container; feche-o e rode de novo");
+    let j = serde_json::to_value(&held).unwrap();
+    assert_eq!((j["reason"].as_str(), j["stage"].as_str(), j["holders"][1]["name"].as_str()), (Some("held-open"), Some("rename"), Some("NVIDIA Overlay")));
+    let open = serde_json::to_value(Skip::OpenFailed { error: OpError::from_code(5) }).unwrap();
+    let rename = serde_json::to_value(Skip::RenameFailed { error: OpError::from_code(5) }).unwrap();
+    assert_eq!((open["reason"].as_str(), rename["reason"].as_str()), (Some("open-failed"), Some("rename-failed")));
+    assert!(Skip::OpenFailed { error: OpError::from_code(5) }.text(Lang::PtBr).contains("abri"));
+}
+
+#[test]
+fn the_free_space_line_after_a_move_says_the_items_are_in_quarantine() {
+    use wdc_core::i18n::{Lang, Msg};
+    let args = [("volume", "C:\\"), ("before", "12.2 GiB"), ("after", "12.2 GiB"), ("measured", "-16.0 KiB"), ("expected", "148 MB")];
+    let en = Lang::En.fmt(Msg::CliFreeSpaceMoved, &args);
+    let pt = Lang::PtBr.fmt(Msg::CliFreeSpaceMoved, &args);
+    assert!(en.contains("in quarantine, not deleted") && en.contains("when they are purged (148 MB expected)"), "{en}");
+    assert!(pt.contains("na quarentena, não foram apagados") && pt.contains("(148 MB esperados)"), "{pt}");
+    assert!(!en.contains("expected 0") && !pt.contains("esperado 0"));
+}
+
+/// Sets the modified time of a file (a future time stands for "changed recently" when the
+/// clock of the test is moved ahead).
+fn touch(p: &Path, t: std::time::SystemTime) {
+    std::fs::OpenOptions::new().write(true).open(p).unwrap().set_modified(t).unwrap();
+}
+
+#[test]
+fn a_temp_folder_with_recent_content_is_not_offered_and_an_old_one_is() {
+    use wdc_core::explain::WhyNot;
+    let base = fresh_dir("temp-recent");
+    let t = temp_dir(&base);
+    let recent = t.join("DiagOutputDir");
+    write(&recent.join("old.etl"), 8192);
+    write(&recent.join("logs").join("deep").join("trace.etl"), 8192);
+    let quiet = t.join("quiet");
+    write(&quiet.join("a").join("b.tmp"), 8192);
+    // The test clock is 9 days ahead of the real one. A file changed 3 days ahead of the real
+    // clock is 6 days old to the rule: under the 7 days, though the folder itself is 9 days old.
+    let ahead = |days: u64| std::time::SystemTime::now() + std::time::Duration::from_secs(days * 86_400);
+    touch(&recent.join("logs").join("deep").join("trace.etl"), ahead(3));
+
+    let d_quiet = draft_of(&base, &quiet);
+    assert_eq!(d_quiet.plan.items.len(), 1, "a folder where nothing is recent is still offered: {:#?}", d_quiet.not_included);
+    let d = draft_of(&base, &recent);
+    let why = d.not_included.iter().find(|n| n.path.ends_with("DiagOutputDir")).map(|n| n.why_not.clone());
+    guard_assert!(
+        "older-than",
+        d.plan.items.is_empty() && matches!(why.as_deref(), Some([WhyNot::ConditionNotMet { .. }])),
+        "a folder with a file changed recently is not offered: {:#?} {:#?}",
+        d.plan.items,
+        why
+    );
+    // The same folder is offered once the recent file is as old as the rest.
+    touch(&recent.join("logs").join("deep").join("trace.etl"), std::time::SystemTime::now());
+    let d = draft_of(&base, &recent);
+    assert_eq!(d.plan.items.len(), 1, "{:#?}", d.not_included);
+    wdc_testkit::remove_tree(&base);
+}
+
+/// A link inside the folder is not followed: its target's recent content does not count.
+#[cfg(unix)]
+#[test]
+fn the_age_walk_does_not_follow_links() {
+    let base = fresh_dir("temp-link");
+    let t = temp_dir(&base);
+    let outside = base.join("outside");
+    write(&outside.join("busy.log"), 8192);
+    touch(&outside.join("busy.log"), std::time::SystemTime::now() + std::time::Duration::from_secs(3 * 86_400));
+    let item = t.join("with-link");
+    write(&item.join("a.tmp"), 8192);
+    std::os::unix::fs::symlink(&outside, item.join("to-outside")).unwrap();
+    let d = draft_of(&base, &item);
+    assert_eq!(d.plan.items.len(), 1, "the link's target is not walked: {:#?}", d.not_included);
+    wdc_testkit::remove_tree(&base);
+}

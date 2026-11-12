@@ -511,6 +511,9 @@ messages! {
     WhyNothingToFree =>
         "deleting it would free nothing",
         "apagar não liberaria nada";
+    WhyHeldOpen =>
+        "held open by: {holders}. Close them and draft again.",
+        "mantido aberto por: {holders}. Feche-os e gere o plano de novo.";
     ClassRegenerableCache =>
         "regenerable cache",
         "cache regenerável";
@@ -664,6 +667,9 @@ messages! {
     CliFreeSpace =>
         "Free space on {volume}: {before} before, {after} after ({measured}; expected {expected}).",
         "Espaço livre em {volume}: {before} antes, {after} depois ({measured}; esperado {expected}).";
+    CliFreeSpaceMoved =>
+        "Free space on {volume}: {before} before, {after} after ({measured}). The items are in quarantine, not deleted: the space returns when they are purged ({expected} expected).",
+        "Espaço livre em {volume}: {before} antes, {after} depois ({measured}). Os itens estão na quarentena, não foram apagados: o espaço volta quando forem apagados ({expected} esperados).";
     CliApplyAsk =>
         "These items move to quarantine (nothing is deleted; `wdc restore` puts them back). This needs proof that you are here.",
         "Estes itens vão para a quarentena (nada é apagado; `wdc restore` devolve). Isto precisa de prova de que você está aqui.";
@@ -835,6 +841,15 @@ messages! {
     ApplyRenameFailed =>
         "could not move it ({error}); nothing forced",
         "não foi possível mover ({error}); nada foi forçado";
+    ApplyOpenFailed =>
+        "could not open it ({error}); nothing forced",
+        "não foi possível abri-lo ({error}); nada foi forçado";
+    ApplyHeldOpen =>
+        "held open by {holders}; close it and run again",
+        "mantido aberto por {holders}; feche-o e rode de novo";
+    ApplyHeldOpenMany =>
+        "held open by {holders}; close them and run again",
+        "mantido aberto por {holders}; feche-os e rode de novo";
     ApplyNotAllowed =>
         "its real path {path} is not allowed: {why}",
         "o caminho real {path} não é permitido: {why}";

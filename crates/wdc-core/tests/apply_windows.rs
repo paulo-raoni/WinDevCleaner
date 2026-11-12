@@ -274,6 +274,170 @@ fn a_file_held_open_keeps_the_whole_folder_in_place() {
         wdc_testkit::remove_tree(&base);
     }
 }
+// ---- who holds an item open (rc.2, task 2) ----
+
+/// Not a test: the child process the holder tests start. Run alone it returns at once; started
+/// with `WDC_HOLD_FILE` it opens that file with no sharing, writes `WDC_HOLD_READY`, and waits
+/// to be killed.
+#[test]
+#[ignore]
+fn holder_child_process() {
+    let Some(file) = std::env::var_os("WDC_HOLD_FILE") else { return };
+    let _held = hold_exclusive(Path::new(&file));
+    std::fs::write(std::env::var_os("WDC_HOLD_READY").expect("ready file"), b"ready").unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(600));
+}
+
+/// A child process holding a file open; killed when dropped, so a failing test leaves nothing.
+struct Holder(std::process::Child);
+
+impl Holder {
+    fn start(file: &Path, ready: &Path) -> Holder {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "holder_child_process", "--ignored", "--nocapture"])
+            .env("WDC_HOLD_FILE", file)
+            .env("WDC_HOLD_READY", ready)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("start the holder child");
+        let holder = Holder(child);
+        let start = std::time::Instant::now();
+        while !ready.exists() {
+            assert!(start.elapsed().as_secs() < 60, "the child never reported holding {}", file.display());
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        holder
+    }
+
+    fn pid(&self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl Drop for Holder {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// A fake profile with an NVIDIA DXCache of three small files; `held.dat` is the one a child holds.
+fn held_fixture(tag: &str) -> (PathBuf, PathBuf, PathBuf, Context) {
+    let base = fresh_dir(tag);
+    let profile = base.join("u");
+    std::fs::create_dir_all(profile.join("AppData").join("Local").join("Temp")).unwrap();
+    let item = profile.join("AppData").join("Local").join("NVIDIA").join("DXCache");
+    std::fs::create_dir_all(item.join("sub")).unwrap();
+    write_file(&item.join("sub").join("shaders.bin"), 64 * 1024);
+    write_file(&item.join("held.dat"), 4096);
+    write_file(&item.join("other.txt"), 100);
+    let c = ctx(&profile, &[]);
+    (base, item, profile, c)
+}
+
+/// A cache folder with a file another program holds open is left out of the plan, and the reason
+/// names that program (here a child process of this test). With the child gone it is offered.
+/// Each assertion fails only for its reason: the pid is the child's, found through the Restart
+/// Manager, and the second draft differs from the first only by the child being killed.
+#[test]
+#[ignore]
+fn a_folder_held_by_another_program_is_left_out_of_the_plan_naming_it() {
+    let (base, item, _profile, c) = held_fixture("held-plan");
+    let data = base.join("data");
+    let opts = DraftOptions { paths: vec![s(&item)], ..Default::default() };
+    let child = Holder::start(&item.join("held.dat"), &base.join("ready"));
+
+    let d = draft(&opts, &RuleSet::built_in(), &c, Some(&s(&data)), now());
+    let why = d.not_included.iter().find(|n| n.path.to_lowercase().ends_with("dxcache")).map(|n| n.why_not.clone());
+    let pids: Vec<u32> = match &why {
+        Some(w) => w.iter().flat_map(|x| if let WhyNot::HeldOpen { holders } = x { holders.iter().map(|h| h.pid).collect() } else { vec![] }).collect(),
+        None => vec![],
+    };
+    guard_assert!("plan-held", pids.contains(&child.pid()), "the child {} is listed as holding the folder: {:#?} / plan items {}", child.pid(), why, d.plan.items.len());
+    assert!(d.plan.items.is_empty(), "a held folder is not in the plan: {:#?}", d.plan.items);
+    let why = why.unwrap();
+    println!("held-open reason: {}", why[0].text(wdc_core::i18n::Lang::En));
+    assert!(why[0].text(wdc_core::i18n::Lang::En).starts_with("held open by: "));
+    assert!(why[0].text(wdc_core::i18n::Lang::PtBr).starts_with("mantido aberto por: "));
+    assert_eq!(serde_json::to_value(&why[0]).unwrap()["reason"], "held-open");
+
+    drop(child);
+    let d = draft(&opts, &RuleSet::built_in(), &c, Some(&s(&data)), now());
+    assert_eq!(d.plan.items.len(), 1, "with the child gone the folder is offered: {:#?}", d.not_included);
+    wdc_testkit::remove_tree(&base);
+}
+
+/// An item that becomes held after the plan is skipped by apply as `held-open` with the holder's
+/// pid; nothing moves and the tree is unchanged; the JSON says which stage Windows refused at.
+#[test]
+#[ignore]
+fn an_item_held_after_the_plan_is_skipped_as_held_open_with_its_holders() {
+    let (base, item, _profile, c) = held_fixture("held-apply");
+    let data = base.join("data");
+    // Planned while nobody holds it (a probe that finds nobody keeps the plan independent of the machine).
+    let opts = DraftOptions { paths: vec![s(&item)], holders: wdc_core::fsops::HolderProbe::new(|_| Some(Vec::new())), ..Default::default() };
+    let d = draft(&opts, &RuleSet::built_in(), &c, Some(&s(&data)), now());
+    assert_eq!(d.plan.items.len(), 1, "{:#?}", d.not_included);
+    let before = tree(&item);
+
+    let child = Holder::start(&item.join("held.dat"), &base.join("ready"));
+    let r = apply_plan(&d.plan, &c, &data, false);
+    let skip = r.items[0].skipped.clone();
+    println!("skip with the child holding a file: {skip:?}");
+    let pids: Vec<u32> = match &skip {
+        Some(Skip::HeldOpen { holders, .. }) => holders.iter().map(|h| h.pid).collect(),
+        _ => vec![],
+    };
+    guard_assert!("apply-held", pids.contains(&child.pid()), "the child {} is listed on the skip: {:#?}", child.pid(), r.items);
+    assert_eq!(r.moved, 0, "{:#?}", r.items);
+    assert_eq!(tree(&item), before, "the tree is unchanged");
+    assert!(quarantine::list(&data).is_empty(), "nothing in quarantine");
+    let j = serde_json::to_value(&r).unwrap();
+    assert_eq!(j["items"][0]["skipped"]["reason"], "held-open");
+    assert!(matches!(j["items"][0]["skipped"]["stage"].as_str(), Some("open" | "rename")), "{j}");
+    assert_eq!(j["items"][0]["skipped"]["holders"][0]["pid"], pids[0]);
+    assert_eq!(j["moved_bytes"], 0);
+    assert!(j["skipped_bytes"].as_u64().unwrap() > 0, "{j}");
+    assert!(skip.unwrap().text(wdc_core::i18n::Lang::En).ends_with("and run again"));
+
+    drop(child);
+    let r = apply_plan(&d.plan, &c, &data, false);
+    assert_eq!(r.moved, 1, "with the child gone the same plan applies: {:#?}", r.items);
+    wdc_testkit::remove_tree(&base);
+}
+
+/// Prints how long one probe takes on a folder of 10,000 files (the cap is `PROBE_FILE_CAP`), for
+/// the reviewer to read from the CI log. The probe must work on the runner.
+#[test]
+#[ignore]
+fn the_probe_time_on_ten_thousand_files_is_printed() {
+    let base = fresh_dir("probe-time");
+    let folder = base.join("DXCache");
+    for d in 0..100 {
+        let dir = folder.join(format!("d{d:03}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in 0..100 {
+            std::fs::write(dir.join(format!("f{f:03}.bin")), b"x").unwrap();
+        }
+    }
+    let registered = wdc_core::fsops::probe_files(&folder, wdc_core::fsops::PROBE_FILE_CAP).len();
+    let probe = wdc_core::fsops::HolderProbe::default();
+    let start = std::time::Instant::now();
+    let found = probe.probe(&folder);
+    let took = start.elapsed();
+    println!(
+        "HELD-PROBE-TIME: 10000 files in the folder, cap {}, {} paths registered, probe took {} ms, result {:?}",
+        wdc_core::fsops::PROBE_FILE_CAP,
+        registered,
+        took.as_millis(),
+        found
+    );
+    assert!(found.is_some(), "the Restart Manager answered");
+    assert_eq!(registered, wdc_core::fsops::PROBE_FILE_CAP + 1, "the item and the capped files");
+    wdc_testkit::remove_tree(&base);
+}
+
 #[test]
 #[ignore]
 fn forbidden_places_are_refused_however_the_path_is_written() {

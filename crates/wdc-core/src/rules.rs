@@ -548,6 +548,35 @@ fn ver(v: (u32, u32)) -> String {
     format!("{}.{:02}", v.0, v.1)
 }
 
+/// When the item last changed: a file's own modified time; for a folder, the newest modified
+/// time of the folder and of anything inside it. The walk never follows a link (a link counts
+/// by its own time). It stops as soon as it meets a time within `min_age_secs` of `now`: the
+/// answer is then "too recent" whatever else is inside. `None` when anything cannot be read,
+/// so the condition is not met (fail closed).
+fn newest_modified(path: &Path, now: SystemTime, min_age_secs: u64) -> Option<SystemTime> {
+    let own = std::fs::symlink_metadata(path).ok()?;
+    let mut newest = own.modified().ok()?;
+    if !own.is_dir() {
+        return Some(newest);
+    }
+    let recent = |t: SystemTime| now.duration_since(t).map(|d| d.as_secs()).unwrap_or(0) < min_age_secs;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if recent(newest) {
+            return Some(newest);
+        }
+        for e in std::fs::read_dir(&dir).ok()? {
+            let e = e.ok()?;
+            let meta = e.metadata().ok()?;
+            newest = newest.max(meta.modified().ok()?);
+            if meta.is_dir() {
+                stack.push(e.path());
+            }
+        }
+    }
+    Some(newest)
+}
+
 #[allow(unused_mut, unused_assignments)]
 fn eval(c: &Condition, item: &str, ctx: &Context) -> CondResult {
     let name = last_name(item);
@@ -567,8 +596,8 @@ fn eval(c: &Condition, item: &str, ctx: &Context) -> CondResult {
                 }
             }
         },
-        Condition::OlderThan { days } => match std::fs::symlink_metadata(native(item)).and_then(|m| m.modified()) {
-            Ok(t) => {
+        Condition::OlderThan { days } => match newest_modified(&native(item), ctx.now, *days as u64 * 86_400) {
+            Some(t) => {
                 let age = ctx.now.duration_since(t).map(|d| d.as_secs()).unwrap_or(0);
                 let mut ok = true;
                 // GUARD-BEGIN(older-than)
@@ -576,7 +605,7 @@ fn eval(c: &Condition, item: &str, ctx: &Context) -> CondResult {
                 // GUARD-END(older-than)
                 (ok, Found::Age { days: age / 86_400, needs: *days })
             }
-            Err(_) => (false, Found::NoDate),
+            None => (false, Found::NoDate),
         },
         Condition::ListedInFile { file, format } => match ctx.expand(file) {
             None => (false, Found::VariableMissing { file: file.clone() }),

@@ -607,7 +607,16 @@ impl AgentHandler for AppCore {
                 match self.ask_approval(plan.clone(), purge_now, Some(client), Some(cancel))? {
                     Some(Decision::Approve(proof)) => {
                         let report = self.run_apply(&plan, purge_now, &proof)?;
-                        Ok(serde_json::json!({ "status": "approved", "changed": report.moved > 0, "report": report.as_ref() }))
+                        Ok(serde_json::json!({
+                            "status": "approved",
+                            "changed": report.moved > 0,
+                            "moved": report.moved,
+                            "moved_bytes": report.moved_bytes,
+                            "skipped": report.skipped,
+                            "skipped_bytes": report.skipped_bytes,
+                            "purged_bytes": report.purged_bytes,
+                            "report": report.as_ref(),
+                        }))
                     }
                     Some(Decision::Reject) => Ok(serde_json::json!({ "status": "rejected", "changed": false })),
                     None => Ok(serde_json::json!({ "status": "timed-out", "changed": false })),

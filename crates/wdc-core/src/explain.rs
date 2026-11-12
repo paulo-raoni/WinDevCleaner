@@ -10,6 +10,7 @@
 use serde::Serialize;
 
 use crate::act::{self, Forbid, Verdict};
+use crate::fsops::{holder_names, Holder};
 use crate::i18n::{Lang, Msg};
 use crate::rules::{canon, Action, Class, CondResult, Condition, Context, Found, Origin, Rule, RuleSet};
 use crate::scan::{scan, ScanOptions, DEDUP_THRESHOLD};
@@ -45,6 +46,8 @@ pub enum WhyNot {
     NotFullyReadable,
     /// Deleting the item would free 0 bytes (set by `plan`).
     NothingToFree,
+    /// Another program has the item, or a file inside it, open (set by `plan`).
+    HeldOpen { holders: Vec<Holder> },
 }
 
 impl WhyNot {
@@ -63,6 +66,7 @@ impl WhyNot {
             WhyNot::Forbidden { forbid } => lang.fmt(Msg::WhyForbidden, &[("why", forbid.text(lang))]),
             WhyNot::NotFullyReadable => lang.t(Msg::WhyNotFullyReadable).into(),
             WhyNot::NothingToFree => lang.t(Msg::WhyNothingToFree).into(),
+            WhyNot::HeldOpen { holders } => lang.fmt(Msg::WhyHeldOpen, &[("holders", &holder_names(holders))]),
         }
     }
 }

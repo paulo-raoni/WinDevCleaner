@@ -13,6 +13,11 @@ All notable changes to WinDevCleaner are listed here. The format follows
 
 ### Fixed
 
+- `plan` leaves out an item another program holds open ("held open by: NVIDIA Container, NVIDIA Overlay. Close them and draft again."), found through the Windows Restart Manager, which only reads: no program is closed or signalled. For a large folder only the first 4,096 files are checked.
+- `apply` names the holders when an item is held open after the plan ("held open by X; close it and run again") and reports an open failure (`open-failed`) apart from a rename failure (`rename-failed`); nothing is ever forced. `apply --json` carries `holders` and `stage` on such a skip.
+- `temp-old` (and the VS Code staging-folder rules) no longer offer a folder whose contents changed recently: the age is that of the newest file inside, not only the folder's own date.
+- The free-space line after `apply` says that the items are in quarantine and the space returns when they are purged, with the expected gain, instead of "expected 0 B" beside a small drop.
+- `apply --json` and the `request_apply` reply carry `skipped_bytes` and `purged_bytes`, and the reply carries `moved`, `moved_bytes` and `skipped` beside `report`.
 - The release no longer carries the install log and the `.wixpdb`.
 - `explain`, `plan` and the approval card now show the real size of a file (a 541 MB `update.exe` showed 0 B), and a file with another name outside the item still counts as freeing nothing.
 - `explain` says when a size is partial ("N items could not be read") and `--json` carries `errors`, `complete` and `first_error_kind`, instead of showing a folder it could not read as 0.
