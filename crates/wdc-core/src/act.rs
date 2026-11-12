@@ -49,10 +49,16 @@ impl Forbid {
 /// Whether the tool may act on a path at all, whatever a rule says.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Verdict {
-    /// The allowed root the path is inside.
+    /// The allowed root the path is inside (the path itself when it is a root).
     pub allowed_root: Option<String>,
-    /// The path is an allowed root itself: only things inside a root can be items.
+    /// The path IS an allowed root, not a thing inside one: only things inside a root can be
+    /// items. Called `is_root_itself` on the wire; the Rust name stays.
+    #[serde(rename = "is_root_itself")]
     pub is_allowed_root: bool,
+    /// The path is strictly inside an allowed root (a root itself is not).
+    pub inside_allowed_root: bool,
+    /// The final path (links resolved) the verdict was given for.
+    pub checked_path: String,
     /// Why the path is forbidden, if it is.
     pub forbidden: Option<Forbid>,
 }
@@ -244,6 +250,7 @@ fn is_browser_user_data(p: &str, before: &[&str], i: usize) -> bool {
 }
 
 /// The verdict for a final path.
+#[allow(unused_mut, unused_assignments)]
 pub fn verdict(final_path: &str, is_dir: bool, ctx: &Context, data_dir: Option<&str>) -> Verdict {
     let roots = allowed_roots(ctx);
     let p = lower(final_path);
@@ -254,7 +261,17 @@ pub fn verdict(final_path: &str, is_dir: bool, ctx: &Context, data_dir: Option<&
         .filter(|r| is_under(final_path, r))
         .max_by_key(|r| r.len())
         .cloned();
-    Verdict { allowed_root, is_allowed_root, forbidden: forbidden_reason(final_path, is_dir, ctx, data_dir) }
+    let mut inside_allowed_root = false;
+    // GUARD-BEGIN(inside-allowed-root)
+    inside_allowed_root = allowed_root.is_some() && !is_allowed_root;
+    // GUARD-END(inside-allowed-root)
+    Verdict {
+        allowed_root,
+        is_allowed_root,
+        inside_allowed_root,
+        checked_path: final_path.to_string(),
+        forbidden: forbidden_reason(final_path, is_dir, ctx, data_dir),
+    }
 }
 
 #[cfg(test)]

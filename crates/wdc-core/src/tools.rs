@@ -101,8 +101,12 @@ pub fn specs() -> Vec<ToolSpec> {
             name: EXPLAIN,
             description: "Why a folder or file is here and what deleting it would free. Reports the rule that knows \
                 it (class, evidence, source, cost, how to manage it), every condition with its result, whether it \
-                is inside the allowed roots or forbidden (checked on its real final path), its size on disk, and \
+                is inside the allowed roots or forbidden, its size on disk, and \
                 every name of each hard-linked file: a file with a name outside the item frees 0 bytes. \
+                In `act_scope`: `checked_path` is the real final path (links resolved) the verdict used; \
+                `inside_allowed_root` is true when that path is strictly inside an allowed root, where items can be; \
+                `is_root_itself` is true when it IS an allowed root (never an item, only what is inside it); \
+                `allowed_root` names the root it is in or at; `forbidden` says why a place is never touched. \
                 Read-only. When the app is open, the app shows the same explanation.",
             schema: || {
                 json!({
@@ -329,7 +333,11 @@ pub fn run_diff(data_dir: &Path, opts: crate::diff::DiffOptions) -> Result<crate
 /// `system_items`: space Windows manages, with the tool that manages each.
 pub fn run_system_items() -> Value {
     let items = crate::system::system_items();
-    json!({ "total_bytes": crate::system::total(&items), "items": items })
+    json!({
+        "total_bytes": crate::system::total(&items),
+        "total_is_lower_bound": crate::system::total_is_lower_bound(&items),
+        "items": items,
+    })
 }
 
 /// `programs`: installed programs and the folders their uninstalls left behind. Read-only; the

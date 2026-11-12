@@ -85,7 +85,7 @@ fn print_draft(lang: Lang, d: &Draft, file: &Path) {
             println!("  {}  [{}] {}", n.path, n.rule_id.as_deref().unwrap_or("-"), why.join("; "));
         }
         if d.not_included.len() > 30 {
-            println!("{}", lang.fmt(Msg::CliDiffMore, &[("n", &(d.not_included.len() - 30).to_string())]));
+            println!("{}", lang.fmt(Msg::CliPlanLeftOutMore, &[("n", &(d.not_included.len() - 30).to_string())]));
         }
     }
     println!("\n{}", lang.fmt(Msg::CliPlanSaved, &[("path", &file.to_string_lossy())]));

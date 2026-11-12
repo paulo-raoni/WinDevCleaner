@@ -6,15 +6,29 @@ All notable changes to WinDevCleaner are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-11-12
+
 ### Added
+
+- `scan --json` says when it cut a list: `errors_listed` / `errors_truncated` and `links_listed` / `links_truncated` beside `errors` and `links` (200 of each are listed while `totals` counts them all), and `errors_by_kind` counts the recorded errors by kind (the first 10,000 are recorded).
+- `system_items`: the status `partial-needs-admin` (a folder with access errors below it), shown as "at least N; the rest needs an administrator", and `total_is_lower_bound` beside `total_bytes`. A missing `hiberfil.sys` on the system drive is reported `absent` with the note "hibernation is off". Items carry an optional English `note`.
+- `programs --json` carries `leftovers_note`: why the folders left behind were not checked (first look, list saved; or N uninstall keys could not be read). The command line and the app say the same in both languages; the unreadable-keys case had no message before.
+- `explain` carries `inside_allowed_root` and `checked_path` in `act_scope`.
 
 - An icon for `WinDevCleaner.exe` and `wdc.exe` (Explorer, Start menu, taskbar), for the app window, for the Start menu shortcut and for the entry in Settings > Apps.
 - The installer shows the MIT licence and a finish page that says where WinDevCleaner was installed and that `wdc` works in any new terminal, with an "Open WinDevCleaner now" option (checked by default). Silent installs (`/qn`) still show nothing.
 
 - Every MCP tool result carries `app` (`connected`, `headless` or `blocked`, plus `app_reason` when blocked), and the server's instructions say whether the person is watching in the app: a headless server no longer claims they are.
 
+### Changed
+
+- `explain`: the `act_scope` field `is_allowed_root` was renamed `is_root_itself` on the wire. It always meant "this path IS an allowed root", which read as "inside an allowed root"; use `inside_allowed_root` for that. The rename is made now, before the JSON contract freezes at 1.0.0.
+- `wdc scan --top N` now limits both lists of the human output, the largest folders and the largest files (defaults 20 and 10); the help says so. The JSON `top_files` is as before and `largest_dirs` is still cut by `--depth`.
+- `wdc plan` ends the list of items left out with "... and N more left out (`--json` lists them all)" instead of the diff's "more changes (see --limit)".
+
 ### Fixed
 
+- A `system_items` folder with access errors below it no longer counts its partial size as a full measurement (status `partial-needs-admin`, total marked as a lower bound).
 - `wdc mcp` started with the app closed now looks for the app before each call and switches to it when it is opened, so the next call shows in the app's activity panel. An agent the person disconnected, or one refused because another agent is attached, still gets errors and never falls back to headless.
 - `plan` leaves out an item another program holds open ("held open by: NVIDIA Container, NVIDIA Overlay. Close them and draft again."), found through the Windows Restart Manager, which only reads: no program is closed or signalled. For a large folder only the first 4,096 files are checked.
 - `apply` names the holders when an item is held open after the plan ("held open by X; close it and run again") and reports an open failure (`open-failed`) apart from a rename failure (`rename-failed`); nothing is ever forced. `apply --json` carries `holders` and `stage` on such a skip.

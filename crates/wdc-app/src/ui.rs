@@ -421,12 +421,8 @@ fn system_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
         return;
     };
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for it in items.iter().filter(|i| i.status != wdc_core::system::Status::Absent) {
-            let size = match (it.bytes, it.status.note()) {
-                (Some(b), None) => fmt::bytes(b),
-                (_, Some(note)) => lang.t(note).to_string(),
-                (None, None) => String::new(),
-            };
+        for it in items.iter().filter(|i| wdc_core::system::is_listed(i)) {
+            let size = wdc_core::system::size_text(lang, it);
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(format!("{size:>10}")).monospace().strong());
                 ui.label(RichText::new(lang.t(it.kind.name())).strong());
@@ -492,8 +488,8 @@ fn programs_view(ui: &mut egui::Ui, lang: Lang, core: &Arc<AppCore>) {
         for e in &report.errors {
             ui.label(RichText::new(lang.fmt(Msg::CliProgramsReadError, &[("error", e)])).color(Color32::from_rgb(0xeb, 0x57, 0x57)));
         }
-        if report.first_look {
-            ui.label(lang.t(Msg::CliProgramsFirstLook));
+        if let Some(note) = report.leftovers_note(lang) {
+            ui.label(note);
         } else if report.leftovers_checked {
             if report.leftovers.is_empty() {
                 ui.label(lang.t(Msg::CliProgramsLeftoversNone));

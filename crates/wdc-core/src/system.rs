@@ -62,6 +62,9 @@ pub enum Status {
     Absent,
     /// Windows only shows it to administrators; version 1 runs without admin rights.
     NeedsAdmin,
+    /// Part of the item could be read and part needs an administrator: `bytes` is at least
+    /// that much, never the whole.
+    PartialNeedsAdmin,
     Error,
 }
 
@@ -77,6 +80,10 @@ pub struct SystemItem {
     pub status: Status,
     /// English text of the Windows setting or tool that manages it, for JSON.
     pub managed_by: String,
+    /// English remark on the status, when the status alone does not say enough (a lower bound,
+    /// hibernation off). Absent from older JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 fn item(kind: Kind, path: Option<String>, bytes: Option<u64>, items: Option<u64>, status: Status) -> SystemItem {
@@ -88,7 +95,64 @@ fn item(kind: Kind, path: Option<String>, bytes: Option<u64>, items: Option<u64>
         items,
         status,
         managed_by: kind.managed_by().text(Lang::En).to_string(),
+        note: match status {
+            Status::PartialNeedsAdmin => Some(PARTIAL_NOTE.to_string()),
+            _ => None,
+        },
     }
+}
+
+const PARTIAL_NOTE: &str = "bytes is a lower bound: the rest needs an administrator";
+
+/// The item for a hibernation file that does not exist on the system drive: hibernation is off.
+pub fn hibernation_off(path: String) -> SystemItem {
+    let mut it = item(Kind::HibernationFile, Some(path), Some(0), Some(0), Status::Absent);
+    it.note = Some(Lang::En.t(Msg::SysHibernationOff).to_string());
+    it
+}
+
+/// The status of a measured folder: `root_unreadable` when the folder itself could not be
+/// opened, `kinds` the kind of each error met below it (`ScanError::kind`). A folder with
+/// access errors below it is only partly measured.
+pub fn folder_status(root_unreadable: bool, kinds: &[&str]) -> Status {
+    let denied = kinds.contains(&"access-denied");
+    if root_unreadable {
+        return if kinds.first() == Some(&"access-denied") { Status::NeedsAdmin } else { Status::Error };
+    }
+    let mut status = Status::Measured;
+    // GUARD-BEGIN(partial-needs-admin)
+    if denied {
+        status = Status::PartialNeedsAdmin;
+    }
+    // GUARD-END(partial-needs-admin)
+    status
+}
+
+/// Whether the total of `items` is a lower bound: some item was only partly measured.
+pub fn total_is_lower_bound(items: &[SystemItem]) -> bool {
+    items.iter().any(|i| i.status == Status::PartialNeedsAdmin)
+}
+
+/// The size column for an item: its size, "at least N; ..." for a partial one, or the reason
+/// there is none. Shared by the command line and the app.
+pub fn size_text(lang: Lang, it: &SystemItem) -> String {
+    match (it.kind, it.status, it.bytes) {
+        (_, Status::PartialNeedsAdmin, Some(b)) => {
+            lang.fmt(Msg::SysStatusPartial, &[("size", &crate::fmt::bytes(b))])
+        }
+        (Kind::HibernationFile, Status::Absent, _) => lang.t(Msg::SysHibernationOff).to_string(),
+        (_, _, bytes) => match (bytes, it.status.note()) {
+            (Some(b), None) => crate::fmt::bytes(b),
+            (_, Some(note)) => lang.t(note).to_string(),
+            (None, None) => String::new(),
+        },
+    }
+}
+
+/// Whether the human views list the item: absent ones are left out, except the hibernation
+/// file, whose absence says hibernation is off.
+pub fn is_listed(it: &SystemItem) -> bool {
+    it.status != Status::Absent || it.kind == Kind::HibernationFile
 }
 
 /// Folders of reports and dumps, measured with the read-only scanner (small trees).
@@ -99,17 +163,9 @@ fn folder(kind: Kind, path: PathBuf) -> SystemItem {
     }
     let opts = crate::scan::ScanOptions { roots: vec![path], top_files: 0, ..Default::default() };
     let r = crate::scan::scan(&opts, None, None);
-    let status = match r.roots.first() {
-        Some(root) if root.node.is_none() => {
-            if r.errors.first().map(|e| e.kind == "access-denied").unwrap_or(false) {
-                Status::NeedsAdmin
-            } else {
-                Status::Error
-            }
-        }
-        _ if r.errors.iter().any(|e| e.kind == "access-denied") => Status::NeedsAdmin,
-        _ => Status::Measured,
-    };
+    let root_unreadable = matches!(r.roots.first(), Some(root) if root.node.is_none());
+    let kinds: Vec<&str> = r.errors.iter().map(|e| e.kind).collect();
+    let status = folder_status(root_unreadable, &kinds);
     let (bytes, files) = if status == Status::Error { (None, None) } else { (Some(r.totals.bytes_on_disk), Some(r.totals.files)) };
     item(kind, Some(display), bytes, files, status)
 }
@@ -130,6 +186,8 @@ pub fn system_items() -> Vec<SystemItem> {
             {
                 if let Some(it) = imp::root_file(kind, drive, name) {
                     out.push(it);
+                } else if kind == Kind::HibernationFile && drive == imp::system_drive() {
+                    out.push(hibernation_off(format!("{drive}:\\{name}")));
                 }
             }
         }
@@ -190,6 +248,15 @@ mod imp {
 
     const DRIVE_FIXED: u32 = 3;
 
+    /// Letter of the drive Windows is installed on (`%SystemDrive%`, `C` when unset).
+    pub fn system_drive() -> char {
+        std::env::var("SystemDrive")
+            .ok()
+            .and_then(|v| v.chars().next())
+            .map(|c| c.to_ascii_uppercase())
+            .unwrap_or('C')
+    }
+
     /// Letters of the fixed drives (`C`, `D`, ...).
     pub fn fixed_drives() -> Vec<char> {
         let mask = unsafe { GetLogicalDrives() };
@@ -229,7 +296,7 @@ impl Status {
         match self {
             Status::Measured => None,
             Status::Absent => Some(Msg::SysStatusAbsent),
-            Status::NeedsAdmin => Some(Msg::SysStatusNeedsAdmin),
+            Status::NeedsAdmin | Status::PartialNeedsAdmin => Some(Msg::SysStatusNeedsAdmin),
             Status::Error => Some(Msg::SysStatusError),
         }
     }

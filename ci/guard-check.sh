@@ -91,6 +91,11 @@ CASES=(
   "leftover-exact|wdc-core|programs|a_folder_named_exactly_like_the_program_is_reported_and_a_longer_or_shorter_name_is_not"
   "leftover-publisher|wdc-core|programs|a_publisher_folder_is_not_reported_while_another_program_has_that_publisher"
   "leftover-name-installed|wdc-core|programs|a_renamed_publisher_does_not_make_an_installed_program_leave_a_folder"
+  "scan-json-says-cut|wdc-core|rc2_polish|scan_json_says_when_it_cut_the_errors_and_links_lists"
+  "partial-needs-admin|wdc-core|rc2_polish|a_folder_with_access_errors_below_it_is_a_partial_measurement"
+  "programs-keys-unreadable|wdc-core|rc2_polish|programs_say_why_the_leftovers_were_not_checked"
+  "inside-allowed-root|wdc-core|rc2_polish|the_verdict_tells_a_root_itself_from_a_place_inside_one"
+  "top-limits-lists|wdc-cli|rc2_polish|top_n_limits_the_folders_and_the_files_of_the_human_output"
 )
 
 run_test() { # package target name log

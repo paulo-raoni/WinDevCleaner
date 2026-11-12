@@ -601,6 +601,9 @@ pub struct Report {
     /// read (a program could look uninstalled only because its key was unreadable) or on the
     /// first look.
     pub leftovers_checked: bool,
+    /// How many uninstall keys (or key lists) could not be read; the first `unreadable` entries
+    /// of `errors`. While any could not be read nothing is compared and the list is not saved.
+    pub unreadable: usize,
     pub errors: Vec<String>,
 }
 
@@ -608,6 +611,21 @@ impl Report {
     /// The sum of the sizes the installers report.
     pub fn reported_bytes_total(&self) -> u64 {
         self.programs.iter().filter_map(|p| p.reported_size_bytes).sum()
+    }
+
+    /// Why the leftovers were not checked, when they were not: this was the first look, or some
+    /// uninstall keys could not be read. `None` when they were checked (or the list could not
+    /// be saved, which `errors` says).
+    pub fn leftovers_note(&self, lang: Lang) -> Option<String> {
+        // GUARD-BEGIN(programs-keys-unreadable)
+        if self.unreadable > 0 {
+            return Some(lang.fmt(Msg::ProgKeysUnreadable, &[("n", &self.unreadable.to_string())]));
+        }
+        // GUARD-END(programs-keys-unreadable)
+        if self.first_look && self.errors.is_empty() {
+            return Some(lang.t(Msg::CliProgramsFirstLook).to_string());
+        }
+        None
     }
 
     /// English, stable JSON for agents and `--json`.
@@ -620,6 +638,7 @@ impl Report {
             "programs": self.programs,
             "first_look": self.first_look,
             "leftovers_checked": self.leftovers_checked,
+            "leftovers_note": self.leftovers_note(Lang::En),
             "leftovers": self.leftovers,
             "errors": self.errors,
         })
@@ -632,7 +651,7 @@ pub fn look(sources: &[Source], data_dir: &Path, roots: &[PathBuf]) -> Report {
     let Reading { programs, errors } = read_programs(sources);
     let current = remember(&programs);
     let previous = load_list(data_dir);
-    let mut report = Report { first_look: previous.is_none(), errors, ..Default::default() };
+    let mut report = Report { first_look: previous.is_none(), unreadable: errors.len(), errors, ..Default::default() };
     if report.errors.is_empty() {
         if let Some(previous) = &previous {
             report.leftovers = leftovers(previous, &current, &list_children(roots));

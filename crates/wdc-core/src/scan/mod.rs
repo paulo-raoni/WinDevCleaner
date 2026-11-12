@@ -323,6 +323,8 @@ impl Sink for SerialSink<'_, '_> {
 /// Caps on recorded lists, so a pathological tree cannot grow the report without bound.
 pub(crate) const MAX_LINKS: usize = 10_000;
 pub(crate) const MAX_ERRORS: usize = 10_000;
+/// How many links and errors the JSON summary lists; `*_listed` and `*_truncated` say when it cut.
+const JSON_LIST_LIMIT: usize = 200;
 
 impl<'a> Collector<'a> {
     pub fn new(
@@ -629,6 +631,19 @@ impl ScanReport {
                 serde_json::json!({ "path": path, "bytes_on_disk": bytes, "files": files })
             })
             .collect();
+        let links: Vec<_> = self.links.iter().take(JSON_LIST_LIMIT).collect();
+        let errors: Vec<_> = self.errors.iter().take(JSON_LIST_LIMIT).collect();
+        // Counts of the recorded errors by kind (the first 10,000 are recorded), so an agent sees
+        // what kind of failure dominates without reading the cut list.
+        let mut by_kind: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+        for e in &self.errors {
+            *by_kind.entry(e.kind).or_default() += 1;
+        }
+        let (mut errors_truncated, mut links_truncated) = (false, false);
+        // GUARD-BEGIN(scan-json-says-cut)
+        errors_truncated |= self.totals.errors > errors.len() as u64;
+        links_truncated |= self.totals.links > links.len() as u64;
+        // GUARD-END(scan-json-says-cut)
         serde_json::json!({
             "started": crate::time::rfc3339(self.started_unix_ms),
             "duration_ms": self.duration_ms,
@@ -637,8 +652,13 @@ impl ScanReport {
             "totals": self.totals,
             "largest_dirs": tree,
             "top_files": self.top_files,
-            "links": self.links.iter().take(200).collect::<Vec<_>>(),
-            "errors": self.errors.iter().take(200).collect::<Vec<_>>(),
+            "links": links,
+            "links_listed": links.len(),
+            "links_truncated": links_truncated,
+            "errors": errors,
+            "errors_listed": errors.len(),
+            "errors_truncated": errors_truncated,
+            "errors_by_kind": by_kind,
             "excluded": self.excluded,
         })
     }
