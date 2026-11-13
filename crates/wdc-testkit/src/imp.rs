@@ -142,15 +142,38 @@ pub fn add_attributes(path: &Path, attrs: u32) {
     assert!(ok != 0, "SetFileAttributesW: {}", std::io::Error::last_os_error());
 }
 
-/// Denies listing a folder to Everyone (the elevated runner's backup privilege is disabled
-/// by default, so this applies to the tests too).
+/// The SID of the user this process runs as, as `whoami /user` prints it.
+fn current_user_sid() -> String {
+    let out = Command::new("whoami").args(["/user", "/fo", "csv", "/nh"]).output().unwrap();
+    assert!(out.status.success(), "whoami: {}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    // "DOMAIN\\name","S-1-5-21-..."
+    let sid = text.trim().rsplit(',').next().unwrap_or("").trim_matches('"').to_string();
+    assert!(sid.starts_with("S-1-"), "whoami /user gave no SID: {text}");
+    sid
+}
+
+/// Denies listing a folder to the process that runs the test: Everyone, the user's own SID and the
+/// Administrators group (an elevated token carries it), with inheritance removed so no inherited
+/// grant is left. (The elevated runner's backup privilege is disabled by default, so this applies to
+/// the tests too.)
 pub fn deny_listing(dir: &Path) {
-    let out = Command::new("icacls").arg(dir).args(["/deny", "*S-1-1-0:(RD)"]).output().unwrap();
+    let user = format!("*{}:(RD)", current_user_sid());
+    let out = Command::new("icacls").arg(dir).arg("/inheritance:r").output().unwrap();
+    assert!(out.status.success(), "icacls /inheritance:r: {}", String::from_utf8_lossy(&out.stdout));
+    let out = Command::new("icacls")
+        .arg(dir)
+        .args(["/deny", "*S-1-1-0:(RD)", "*S-1-5-32-544:(RD)"])
+        .arg(&user)
+        .output()
+        .unwrap();
     assert!(out.status.success(), "icacls: {}", String::from_utf8_lossy(&out.stdout));
 }
 
 pub fn allow_listing(dir: &Path) {
-    let _ = Command::new("icacls").arg(dir).args(["/remove:d", "*S-1-1-0"]).output();
+    let user = format!("*{}", current_user_sid());
+    let _ = Command::new("icacls").arg(dir).args(["/remove:d", "*S-1-1-0", "*S-1-5-32-544"]).arg(&user).output();
+    let _ = Command::new("icacls").arg(dir).arg("/inheritance:e").output();
 }
 
 /// Opens a file with no sharing at all, as a program holding it exclusively would.
