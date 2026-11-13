@@ -230,8 +230,16 @@ and `request_apply`. The app's view follows the agent: it shows the scan, the fo
 comparison, the system items, the programs or the plan the agent is reading. With the app open,
 every call runs in the app while you watch, with "Agent connected: <name>", every call live in the
 activity panel and "Pause agent" / "Disconnect agent" buttons. With it closed, `wdc mcp` runs
-headless (`wdc mcp --show` opens the app first). The `scan` tool takes an optional `jobs` (1 to 4,
-default 1), the same as `wdc scan --jobs`, for when the person is waiting for the result.
+headless (`wdc mcp --show` opens the app first). Every tool result says which it is, in a top-level
+`app` key: `connected`, `headless` or `blocked` (with `app_reason`), and the server's instructions
+say whether the person is watching. A headless server looks for the app before each call, so an app
+opened after the agent started receives the next call (the scan held in the headless server is not
+carried over: call `scan` again before `tree`). The app stays open when the agent leaves. One agent
+at a time can attach to the app: while another is attached, or after you pressed "Disconnect
+agent", new agents are `blocked` with the reason (close the other agent, or allow agents again in
+the app). An agent that was blocked or disconnected never falls back to headless. The `scan` tool
+takes an optional `jobs` (1 to 4, default 1), the same as `wdc scan --jobs`, for when the person is
+waiting for the result.
 
 An agent can never apply, restore or purge. `request_apply` shows the plan on an approval card in
 the app, with each item's evidence, and the agent gets back approved, rejected or timed out; with

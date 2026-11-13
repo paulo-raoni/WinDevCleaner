@@ -10,6 +10,7 @@
 use serde::Serialize;
 
 use crate::act::{self, Forbid, Verdict};
+use crate::fsops::{holder_names, Holder};
 use crate::i18n::{Lang, Msg};
 use crate::rules::{canon, Action, Class, CondResult, Condition, Context, Found, Origin, Rule, RuleSet};
 use crate::scan::{scan, ScanOptions, DEDUP_THRESHOLD};
@@ -40,7 +41,15 @@ pub enum WhyNot {
     IsLink,
     AllowedRootItself,
     OutsideAllowedRoots,
+    /// The item sits inside the allowed roots by its name, but a link leads its real place outside them.
+    ResolvesOutsideAllowedRoots { final_path: String },
     Forbidden { forbid: Forbid },
+    /// Part of the item could not be read, so its size is incomplete (set by `plan`).
+    NotFullyReadable,
+    /// Deleting the item would free 0 bytes (set by `plan`).
+    NothingToFree,
+    /// Another program has the item, or a file inside it, open (set by `plan`).
+    HeldOpen { holders: Vec<Holder> },
 }
 
 impl WhyNot {
@@ -56,13 +65,20 @@ impl WhyNot {
             WhyNot::IsLink => lang.t(Msg::WhyIsLink).into(),
             WhyNot::AllowedRootItself => lang.t(Msg::WhyAllowedRoot).into(),
             WhyNot::OutsideAllowedRoots => lang.t(Msg::WhyOutsideRoots).into(),
+            WhyNot::ResolvesOutsideAllowedRoots { final_path } => lang.fmt(Msg::WhyResolvesOutsideRoots, &[("path", final_path)]),
             WhyNot::Forbidden { forbid } => lang.fmt(Msg::WhyForbidden, &[("why", forbid.text(lang))]),
+            WhyNot::NotFullyReadable => lang.t(Msg::WhyNotFullyReadable).into(),
+            WhyNot::NothingToFree => lang.t(Msg::WhyNothingToFree).into(),
+            WhyNot::HeldOpen { holders } => {
+                let msg = if holders.len() == 1 { Msg::WhyHeldOpenOne } else { Msg::WhyHeldOpen };
+                lang.fmt(msg, &[("holders", &holder_names(holders))])
+            }
         }
     }
 }
 
 /// Exact manual steps for an item the tool never deletes itself (version 1: NVIDIA update
-/// artifacts, which need administrator rights).
+/// artifacts, which may need administrator rights).
 #[derive(Clone, Debug, PartialEq)]
 pub enum ManualSteps {
     /// The artifact is not newer than the installed driver: how to remove it by hand.
@@ -157,6 +173,13 @@ pub struct Explanation {
     pub bytes_on_disk: u64,
     pub logical_bytes: u64,
     pub files: u64,
+    /// Items inside it that could not be read: the size above leaves them out.
+    pub errors: u64,
+    /// Every part of it was read (`errors == 0`).
+    pub complete: bool,
+    /// The kind of the first read error; absent when complete.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_error_kind: Option<&'static str>,
     /// What deleting the item would free: files with a name outside the item count 0.
     pub expected_freed_bytes: u64,
     pub hard_links: Vec<HardLinked>,
@@ -183,6 +206,61 @@ pub struct Explanation {
     pub manual_steps: Option<Vec<String>>,
 }
 
+/// The names of one hard-linked file inside (or beside) the item. Another name outside the
+/// item keeps the data on disk: deleting the item frees nothing of that file.
+fn check_names(
+    path: &str,
+    bytes_on_disk: u64,
+    item_key: &str,
+    seen: &mut std::collections::HashSet<String>,
+    hard_links: &mut Vec<HardLinked>,
+    outside_bytes: &mut u64,
+) {
+    let Some((links, names)) = platform::names(path) else { return };
+    if links <= 1 {
+        return;
+    }
+    let names_outside: Vec<String> = names
+        .iter()
+        .filter(|n| {
+            let k = canon(n).to_lowercase();
+            !(k == item_key || k.starts_with(&format!("{item_key}\\")))
+        })
+        .cloned()
+        .collect();
+    // Another name elsewhere keeps the data on disk: deleting the item frees nothing of it.
+    // GUARD-BEGIN(expected-freed)
+    if !names_outside.is_empty() || names.len() < links as usize {
+        *outside_bytes += bytes_on_disk;
+    }
+    // GUARD-END(expected-freed)
+    let key = names.iter().map(|n| canon(n).to_lowercase()).min().unwrap_or_default();
+    if seen.insert(key) {
+        hard_links.push(HardLinked { path: path.to_string(), bytes_on_disk, links, names, names_outside });
+    }
+}
+
+impl Explanation {
+    /// "Size on disk: ... in N files." (singular for one file).
+    pub fn size_line(&self, lang: Lang) -> String {
+        let size = crate::fmt::bytes(self.bytes_on_disk);
+        if self.files == 1 {
+            lang.fmt(Msg::ExplainSizeOne, &[("size", &size)])
+        } else {
+            lang.fmt(Msg::ExplainSize, &[("size", &size), ("files", &crate::fmt::count(self.files))])
+        }
+    }
+
+    /// "Partial: N items could not be read ..." when the size is incomplete.
+    pub fn partial_line(&self, lang: Lang) -> Option<String> {
+        match self.errors {
+            0 => None,
+            1 => Some(lang.t(Msg::ExplainPartialOne).into()),
+            n => Some(lang.fmt(Msg::ExplainPartial, &[("n", &crate::fmt::count(n))])),
+        }
+    }
+}
+
 /// Explains `path`. `data_dir` locates the local rules and the quarantine folder.
 pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str>) -> Explanation {
     let abs = std::path::absolute(crate::rules::native(&canon(path)))
@@ -202,48 +280,57 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
     };
     let final_path = if exists { platform::final_path(&item_native) } else { None };
 
-    // Size, and every file of at least 1 MB with its names.
+    // Size, and every file of at least 1 MB with its names. A file is measured from its own
+    // handle (the scanners walk folders); a folder by a scan rooted at it.
     let mut bytes_on_disk = 0;
     let mut logical_bytes = 0;
     let mut files = 0;
+    let mut errors = 0u64;
+    let mut first_error_kind = None;
     let mut hard_links = Vec::new();
     let mut outside_bytes = 0u64;
     let mut large_files = Vec::new();
-    if exists && kind != "link" {
+    // Windows lists a file's names in their long form: compare with the item's final path,
+    // not with the text given (which may use short names such as RUNNER~1).
+    let item_key = canon(final_path.as_deref().unwrap_or(&item)).to_lowercase();
+    let mut seen = std::collections::HashSet::new();
+    if exists && kind == "file" {
+        match platform::file_facts(&item_native) {
+            Ok(f) => {
+                // GUARD-BEGIN(file-root-size)
+                bytes_on_disk = f.allocation;
+                // GUARD-END(file-root-size)
+                logical_bytes = f.length;
+                files = 1;
+                let path = item_native.to_string_lossy().into_owned();
+                if f.allocation >= DEDUP_THRESHOLD {
+                    large_files.push(path.clone());
+                }
+                check_names(&path, f.allocation, &item_key, &mut seen, &mut hard_links, &mut outside_bytes);
+            }
+            Err(code) => {
+                errors = 1;
+                first_error_kind = Some(crate::scan::error_kind(code));
+            }
+        }
+    } else if exists && kind != "link" {
         let report = scan(&ScanOptions { roots: vec![item_native.clone()], top_files: 0, collect_large: true, ..Default::default() }, None, None);
         bytes_on_disk = report.totals.bytes_on_disk;
         logical_bytes = report.totals.logical_bytes;
         files = report.totals.files;
-        // Windows lists a file's names in their long form: compare with the item's final path,
-        // not with the text given (which may use short names such as RUNNER~1).
-        let item_key = canon(final_path.as_deref().unwrap_or(&item)).to_lowercase();
-        let mut seen = std::collections::HashSet::new();
+        errors = report.totals.errors;
+        first_error_kind = report.errors.first().map(|e| e.kind);
         large_files = report.large_files.iter().filter(|f| f.bytes_on_disk >= DEDUP_THRESHOLD).map(|f| f.path.clone()).collect();
         for f in report.large_files.iter().filter(|f| f.bytes_on_disk >= DEDUP_THRESHOLD) {
-            let Some((links, names)) = platform::names(&f.path) else { continue };
-            if links <= 1 {
-                continue;
-            }
-            let names_outside: Vec<String> = names
-                .iter()
-                .filter(|n| {
-                    let k = canon(n).to_lowercase();
-                    !(k == item_key || k.starts_with(&format!("{item_key}\\")))
-                })
-                .cloned()
-                .collect();
-            // Another name elsewhere keeps the data on disk: deleting the item frees nothing of it.
-            // GUARD-BEGIN(expected-freed)
-            if !names_outside.is_empty() || names.len() < links as usize {
-                outside_bytes += f.bytes_on_disk;
-            }
-            // GUARD-END(expected-freed)
-            let key = names.iter().map(|n| canon(n).to_lowercase()).min().unwrap_or_default();
-            if seen.insert(key) {
-                hard_links.push(HardLinked { path: f.path.clone(), bytes_on_disk: f.bytes_on_disk, links, names, names_outside });
-            }
+            check_names(&f.path, f.bytes_on_disk, &item_key, &mut seen, &mut hard_links, &mut outside_bytes);
         }
     }
+    // Every part of the item was read.
+    #[allow(unused_assignments)]
+    let mut complete = true;
+    // GUARD-BEGIN(explain-complete)
+    complete = errors == 0;
+    // GUARD-END(explain-complete)
     let expected_freed_bytes = bytes_on_disk.saturating_sub(outside_bytes);
 
     let checked = final_path.clone().unwrap_or_else(|| canon(&item));
@@ -307,7 +394,14 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
     if act_scope.is_allowed_root {
         why_not.push(WhyNot::AllowedRootItself);
     } else if act_scope.allowed_root.is_none() {
-        why_not.push(WhyNot::OutsideAllowedRoots);
+        match &final_path {
+            // GUARD-BEGIN(resolves-outside)
+            Some(f) if canon(f).to_lowercase() != canon(&item).to_lowercase() => {
+                why_not.push(WhyNot::ResolvesOutsideAllowedRoots { final_path: canon(f) })
+            }
+            // GUARD-END(resolves-outside)
+            _ => why_not.push(WhyNot::OutsideAllowedRoots),
+        }
     }
     if let Some(f) = &act_scope.forbidden {
         why_not.push(WhyNot::Forbidden { forbid: f.clone() });
@@ -327,6 +421,9 @@ pub fn explain(path: &str, rules: &RuleSet, ctx: &Context, data_dir: Option<&str
         bytes_on_disk,
         logical_bytes,
         files,
+        errors,
+        complete,
+        first_error_kind,
         expected_freed_bytes,
         hard_links,
         large_files,
@@ -367,6 +464,12 @@ pub fn unknown_large(report: &crate::scan::ScanReport, rules: &RuleSet, ctx: &Co
     out
 }
 
+/// What a file says about itself.
+struct FileFacts {
+    allocation: u64,
+    length: u64,
+}
+
 #[cfg(windows)]
 mod platform {
     use std::path::Path;
@@ -378,10 +481,15 @@ mod platform {
         FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, OPEN_EXISTING, VOLUME_NAME_DOS,
     };
 
+    use super::FileFacts;
     use crate::win::{display_path, verbatim, OwnedHandle};
 
     fn open(path: &Path) -> Option<OwnedHandle> {
-        let mut w = verbatim(path).ok()?;
+        open_code(path).ok()
+    }
+
+    fn open_code(path: &Path) -> Result<OwnedHandle, u32> {
+        let mut w = verbatim(path).map_err(|e| e.raw_os_error().unwrap_or(0) as u32)?;
         w.push(0);
         let h = unsafe {
             CreateFileW(
@@ -394,7 +502,26 @@ mod platform {
                 std::ptr::null_mut(),
             )
         };
-        OwnedHandle::new(h)
+        OwnedHandle::new(h).ok_or_else(crate::win::last_error)
+    }
+
+    /// Allocation size, length and link count of a file, from `FILE_STANDARD_INFO`; the
+    /// Windows error code when it cannot be read.
+    pub fn file_facts(path: &Path) -> Result<FileFacts, u32> {
+        let h = open_code(path)?;
+        let mut info: FILE_STANDARD_INFO = unsafe { std::mem::zeroed() };
+        let ok = unsafe {
+            GetFileInformationByHandleEx(
+                h.raw(),
+                FileStandardInfo,
+                &mut info as *mut FILE_STANDARD_INFO as *mut core::ffi::c_void,
+                std::mem::size_of::<FILE_STANDARD_INFO>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(crate::win::last_error());
+        }
+        Ok(FileFacts { allocation: info.AllocationSize as u64, length: info.EndOfFile as u64 })
     }
 
     /// The real path of the object itself (links not followed), from an open handle.
@@ -458,9 +585,17 @@ mod platform {
     use std::os::unix::fs::MetadataExt;
     use std::path::Path;
 
+    use super::FileFacts;
+
     pub fn final_path(path: &Path) -> Option<String> {
         let parent = std::fs::canonicalize(path.parent()?).ok()?;
         Some(parent.join(path.file_name()?).to_string_lossy().into_owned())
+    }
+
+    /// Allocation (blocks) and length of a file; the OS error number when it cannot be read.
+    pub fn file_facts(path: &Path) -> Result<FileFacts, u32> {
+        let m = std::fs::symlink_metadata(path).map_err(|e| e.raw_os_error().unwrap_or(0) as u32)?;
+        Ok(FileFacts { allocation: m.blocks() * 512, length: m.len() })
     }
 
     /// POSIX cannot list a file's other names: they are reported as unknown (outside).

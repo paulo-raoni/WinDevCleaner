@@ -161,7 +161,7 @@ fn scan_command(args: &[String], lang: Lang) -> ExitCode {
         summary["process"] = process_json(background);
         println!("{}", serde_json::to_string_pretty(&summary).unwrap());
     } else {
-        print_human(lang, &scan_args, &report, &summary);
+        print_human(lang, &scan_args, &report, &summary, top);
     }
     if report.roots.iter().all(|r| r.node.is_none() && !r.is_link) {
         return ExitCode::from(2);
@@ -182,7 +182,19 @@ fn process_json(background: wdc_core::background::BackgroundState) -> serde_json
     serde_json::json!({ "background_mode": background, "memory": mem })
 }
 
-fn print_human(lang: Lang, args: &ScanArgs, report: &wdc_core::scan::ScanReport, summary: &serde_json::Value) {
+/// How many folders and files the human lists show: `--top N` for both, else 20 and 10.
+fn human_list_sizes(top: Option<usize>) -> (usize, usize) {
+    let mut sizes = (20, 10);
+    // GUARD-BEGIN(top-limits-lists)
+    if let Some(n) = top {
+        sizes = (n, n);
+    }
+    // GUARD-END(top-limits-lists)
+    sizes
+}
+
+fn print_human(lang: Lang, args: &ScanArgs, report: &wdc_core::scan::ScanReport, summary: &serde_json::Value, top: Option<usize>) {
+    let (folder_count, file_count) = human_list_sizes(top);
     let t = &report.totals;
     println!(
         "{}",
@@ -204,7 +216,7 @@ fn print_human(lang: Lang, args: &ScanArgs, report: &wdc_core::scan::ScanReport,
         }
     }
 
-    let dirs = report.largest_dirs(args.depth, 20);
+    let dirs = report.largest_dirs(args.depth, folder_count);
     if !dirs.is_empty() {
         println!("\n{}", lang.t(Msg::CliLargestFolders));
         for (path, bytes, _) in dirs {
@@ -213,7 +225,7 @@ fn print_human(lang: Lang, args: &ScanArgs, report: &wdc_core::scan::ScanReport,
     }
     if !report.top_files.is_empty() {
         println!("\n{}", lang.t(Msg::CliLargestFiles));
-        for f in report.top_files.iter().take(10) {
+        for f in report.top_files.iter().take(file_count) {
             let note = if f.links > 1 {
                 format!("  {}", lang.fmt(Msg::CliHardLinkNote, &[("links", &f.links.to_string())]))
             } else {
@@ -280,25 +292,17 @@ fn held_if_any(lang: Lang) {
 }
 
 fn print_system_items(lang: Lang, items: &[serde_json::Value]) {
-    use wdc_core::system::{Kind, Status};
     for it in items {
-        let (Ok(kind), Ok(status)) = (
-            serde_json::from_value::<Kind>(it["kind"].clone()),
-            serde_json::from_value::<Status>(it["status"].clone()),
-        ) else {
+        let Ok(item) = serde_json::from_value::<wdc_core::system::SystemItem>(it.clone()) else {
             continue;
         };
-        if status == Status::Absent {
+        if !wdc_core::system::is_listed(&item) {
             continue;
         }
-        let size = match (it["bytes"].as_u64(), status.note()) {
-            (Some(b), None) => fmt::bytes(b),
-            (_, Some(note)) => lang.t(note).to_string(),
-            (None, None) => String::new(),
-        };
-        let path = it["path"].as_str().map(|p| format!("  {p}")).unwrap_or_default();
-        println!("  {:>10}  {}{path}", size, lang.t(kind.name()));
-        println!("              {}", lang.t(kind.managed_by()));
+        let size = wdc_core::system::size_text(lang, &item);
+        let path = item.path.as_deref().map(|p| format!("  {p}")).unwrap_or_default();
+        println!("  {:>10}  {}{path}", size, lang.t(item.kind.name()));
+        println!("              {}", lang.t(item.kind.managed_by()));
     }
 }
 
@@ -359,8 +363,8 @@ fn print_programs(lang: Lang, report: &wdc_core::programs::Report) {
     for e in &report.errors {
         eprintln!("{}", lang.fmt(Msg::CliProgramsReadError, &[("error", e)]));
     }
-    if report.first_look {
-        println!("{}", lang.t(Msg::CliProgramsFirstLook));
+    if let Some(note) = report.leftovers_note(lang) {
+        println!("{note}");
     } else if report.leftovers_checked {
         if report.leftovers.is_empty() {
             println!("{}", lang.t(Msg::CliProgramsLeftoversNone));
@@ -524,10 +528,10 @@ pub fn print_explanation(lang: Lang, e: &wdc_core::explain::Explanation) {
         println!("  {}", lang.fmt(Msg::ExplainInside, &[("path", &e.path)]));
     }
     if e.exists {
-        println!(
-            "  {}",
-            lang.fmt(Msg::ExplainSize, &[("size", &fmt::bytes(e.bytes_on_disk)), ("files", &fmt::count(e.files))])
-        );
+        println!("  {}", e.size_line(lang));
+        if let Some(partial) = e.partial_line(lang) {
+            println!("  {partial}");
+        }
         println!("  {}", lang.fmt(Msg::ExplainFreed, &[("size", &fmt::bytes(e.expected_freed_bytes))]));
     }
     for h in &e.hard_links {
@@ -555,7 +559,7 @@ pub fn print_explanation(lang: Lang, e: &wdc_core::explain::Explanation) {
                 println!("  {}", lang.fmt(Msg::ExplainLocalRuleNote, &[("file", file)]));
             }
             println!("  {}", lang.fmt(Msg::ExplainEvidence, &[("text", full.evidence(lang))]));
-            println!("  {}", lang.fmt(Msg::ExplainSource, &[("text", &full.source)]));
+            println!("  {}", lang.fmt(Msg::ExplainSource, &[("text", full.source(lang))]));
             println!("  {}", lang.fmt(Msg::ExplainCost, &[("text", full.cost(lang))]));
             if let Some(how) = full.instructions(lang) {
                 println!("  {}", lang.fmt(Msg::ExplainHow, &[("text", how)]));

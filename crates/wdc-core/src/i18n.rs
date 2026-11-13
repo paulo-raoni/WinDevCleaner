@@ -94,8 +94,8 @@ macro_rules! messages {
 messages! {
     // Command line.
     CliUsage =>
-        "WinDevCleaner {version}: find where your disk space is, and clean it safely.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--jobs N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      --jobs N (1 to 4, default 1) walks with N threads, each in background mode: the same\n      report, faster on a cold disk, when you are waiting for it.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc explain PATH [--json]\n      Why a folder or file is here, the rule that knows it, and what deleting it would free.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc plan [PATH ...] [--class CLASS] [--rule ID] [-o FILE] [--json]\n      Drafts a plan of what may move to quarantine now, each item explained. Changes nothing.\n  wdc plan show FILE [--json]\n  wdc apply --plan FILE [--purge-now] [--json]\n      Moves the plan's items to quarantine after re-checking each one. Needs proof that\n      you are here (Windows Hello, or a code shown in a desktop dialog).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Deletes quarantined items older than 7 days; --now also younger caches and install\n      leftovers. Restore and purge need the same proof.\n  wdc programs [--json]\n      Installed programs with the size each installer reports and its own uninstall command\n      (never run by this tool), then the folders left behind by programs uninstalled since the\n      last look. Read-only.\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless. Agents can never apply by themselves.\n  wdc --version\n",
-        "WinDevCleaner {version}: descubra onde está o espaço do seu disco, e limpe com segurança.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--jobs N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      --jobs N (1 a 4, padrão 1) percorre com N threads, cada uma em modo em segundo plano: o\n      mesmo relatório, mais rápido num disco frio, quando você está esperando por ele.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc explain CAMINHO [--json]\n      Por que uma pasta ou arquivo está aqui, a regra que o conhece, e o que apagar liberaria.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc plan [CAMINHO ...] [--class CLASSE] [--rule ID] [-o ARQUIVO] [--json]\n      Monta um plano do que pode ir para a quarentena agora, cada item explicado. Não altera nada.\n  wdc plan show ARQUIVO [--json]\n  wdc apply --plan ARQUIVO [--purge-now] [--json]\n      Move os itens do plano para a quarentena depois de checar cada um de novo. Precisa de\n      prova de que você está aqui (Windows Hello, ou um código numa janela da área de trabalho).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Apaga itens da quarentena com mais de 7 dias; --now também caches e sobras de instalação\n      mais novos. Restaurar e apagar precisam da mesma prova.\n  wdc programs [--json]\n      Programas instalados com o tamanho que cada instalador informa e o seu comando de\n      desinstalação (nunca executado por esta ferramenta), e as pastas deixadas por programas\n      desinstalados desde a última consulta. Só leitura.\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela. Agentes nunca aplicam sozinhos.\n  wdc --version\n";
+        "WinDevCleaner {version}: find where your disk space is, and clean it safely.\n\nUsage:\n  wdc scan [PATH ...] [--json] [--throttle MS] [--top N] [--depth N] [--jobs N] [--lang en|pt-BR]\n      Gentle scan (background mode) of the read scope, or of the given folders.\n      --top N shows the N largest folders and the N largest files (default 20 and 10) and keeps N files in\n      the JSON list `top_files` (default 50); the JSON `largest_dirs` is cut by --depth, not by --top.\n      --jobs N (1 to 4, default 1) walks with N threads, each in background mode: the same\n      report, faster on a cold disk, when you are waiting for it.\n      Saves a snapshot in the WinDevCleaner data folder; changes nothing else.\n  wdc explain PATH [--json]\n      Why a folder or file is here, the rule that knows it, and what deleting it would free.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      What grew since the previous scan of the same folders (from the saved snapshots).\n  wdc plan [PATH ...] [--class CLASS] [--rule ID] [-o FILE] [--json]\n      Drafts a plan of what may move to quarantine now, each item explained. Changes nothing.\n  wdc plan show FILE [--json]\n  wdc apply --plan FILE [--purge-now] [--json]\n      Moves the plan's items to quarantine after re-checking each one. Needs proof that\n      you are here (Windows Hello, or a code shown in a desktop dialog).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Deletes quarantined items older than 7 days; --now also younger caches and install\n      leftovers. Restore and purge need the same proof.\n  wdc programs [--json]\n      Installed programs with the size each installer reports and its own uninstall command\n      (never run by this tool), then the folders left behind by programs uninstalled since the\n      last look. Read-only.\n  wdc mcp [--show]\n      MCP server on stdio for AI agents. Drives the WinDevCleaner app when it is open\n      (--show opens it); otherwise runs headless. Agents can never apply by themselves.\n  wdc --version\n",
+        "WinDevCleaner {version}: descubra onde está o espaço do seu disco, e limpe com segurança.\n\nUso:\n  wdc scan [PASTA ...] [--json] [--throttle MS] [--top N] [--depth N] [--jobs N] [--lang en|pt-BR]\n      Análise suave (modo em segundo plano) do escopo de leitura, ou das pastas indicadas.\n      --top N mostra as N maiores pastas e os N maiores arquivos (padrão 20 e 10) e guarda N arquivos na\n      lista JSON `top_files` (padrão 50); `largest_dirs` no JSON é cortada por --depth, não por --top.\n      --jobs N (1 a 4, padrão 1) percorre com N threads, cada uma em modo em segundo plano: o\n      mesmo relatório, mais rápido num disco frio, quando você está esperando por ele.\n      Salva um snapshot na pasta de dados do WinDevCleaner; não altera mais nada.\n  wdc explain CAMINHO [--json]\n      Por que uma pasta ou arquivo está aqui, a regra que o conhece, e o que apagar liberaria.\n  wdc diff [--from SNAPSHOT] [--to SNAPSHOT] [--min-mb N] [--limit N] [--json]\n      O que cresceu desde a análise anterior das mesmas pastas (pelos snapshots salvos).\n  wdc plan [CAMINHO ...] [--class CLASSE] [--rule ID] [-o ARQUIVO] [--json]\n      Monta um plano do que pode ir para a quarentena agora, cada item explicado. Não altera nada.\n  wdc plan show ARQUIVO [--json]\n  wdc apply --plan ARQUIVO [--purge-now] [--json]\n      Move os itens do plano para a quarentena depois de checar cada um de novo. Precisa de\n      prova de que você está aqui (Windows Hello, ou um código numa janela da área de trabalho).\n  wdc quarantine [--json]\n  wdc restore ID\n  wdc purge [--now] [ID ...]\n      Apaga itens da quarentena com mais de 7 dias; --now também caches e sobras de instalação\n      mais novos. Restaurar e apagar precisam da mesma prova.\n  wdc programs [--json]\n      Programas instalados com o tamanho que cada instalador informa e o seu comando de\n      desinstalação (nunca executado por esta ferramenta), e as pastas deixadas por programas\n      desinstalados desde a última consulta. Só leitura.\n  wdc mcp [--show]\n      Servidor MCP em stdio para agentes de IA. Comanda o app WinDevCleaner quando ele\n      está aberto (--show abre o app); senão roda sem janela. Agentes nunca aplicam sozinhos.\n  wdc --version\n";
     CliUnknownCommand =>
         "Unknown command or option: {arg}. Run `wdc --help`.",
         "Comando ou opção desconhecida: {arg}. Rode `wdc --help`.";
@@ -274,6 +274,9 @@ messages! {
     CliDiffMore =>
         "... and {n} more changes (see --limit).",
         "... e mais {n} mudanças (veja --limit).";
+    CliPlanLeftOutMore =>
+        "... and {n} more left out (`--json` lists them all).",
+        "... e mais {n} deixados de fora (`--json` lista todos).";
     DiffNew =>
         "new",
         "novo";
@@ -297,6 +300,12 @@ messages! {
     SysStatusNeedsAdmin =>
         "only an administrator can read it",
         "só um administrador pode ler";
+    SysStatusPartial =>
+        "at least {size}; the rest needs an administrator",
+        "pelo menos {size}; o resto precisa de um administrador";
+    SysHibernationOff =>
+        "hibernation is off",
+        "a hibernação está desligada";
     SysStatusError =>
         "could not be read",
         "não pôde ser lido";
@@ -502,9 +511,24 @@ messages! {
     WhyOutsideRoots =>
         "outside the allowed roots",
         "fora das raízes permitidas";
+    WhyResolvesOutsideRoots =>
+        "resolves through a link to {path}, outside the allowed roots",
+        "passa por um link até {path}, fora das raízes permitidas";
     WhyForbidden =>
         "forbidden: {why}",
         "proibido: {why}";
+    WhyNotFullyReadable =>
+        "its size is incomplete: some of it could not be read",
+        "o tamanho está incompleto: parte dele não pôde ser lida";
+    WhyNothingToFree =>
+        "deleting it would free nothing",
+        "apagar não liberaria nada";
+    WhyHeldOpen =>
+        "held open by: {holders}. Close them and draft again.",
+        "mantido aberto por: {holders}. Feche-os e gere o plano de novo.";
+    WhyHeldOpenOne =>
+        "held open by: {holders}. Close it and draft again.",
+        "mantido aberto por: {holders}. Feche-o e gere o plano de novo.";
     ClassRegenerableCache =>
         "regenerable cache",
         "cache regenerável";
@@ -547,6 +571,15 @@ messages! {
     ExplainSize =>
         "Size on disk: {size} in {files} files.",
         "Tamanho em disco: {size} em {files} arquivos.";
+    ExplainSizeOne =>
+        "Size on disk: {size} in 1 file.",
+        "Tamanho em disco: {size} em 1 arquivo.";
+    ExplainPartial =>
+        "Partial: {n} items could not be read, so the real size may be larger.",
+        "Parcial: {n} itens não puderam ser lidos, então o tamanho real pode ser maior.";
+    ExplainPartialOne =>
+        "Partial: 1 item could not be read, so the real size may be larger.",
+        "Parcial: 1 item não pôde ser lido, então o tamanho real pode ser maior.";
     ExplainFreed =>
         "Deleting it would free: {size}.",
         "Apagar liberaria: {size}.";
@@ -649,6 +682,9 @@ messages! {
     CliFreeSpace =>
         "Free space on {volume}: {before} before, {after} after ({measured}; expected {expected}).",
         "Espaço livre em {volume}: {before} antes, {after} depois ({measured}; esperado {expected}).";
+    CliFreeSpaceMoved =>
+        "Free space on {volume}: {before} before, {after} after ({measured}). The items are in quarantine, not deleted: the space returns when they are purged ({expected} expected).",
+        "Espaço livre em {volume}: {before} antes, {after} depois ({measured}). Os itens estão na quarentena, não foram apagados: o espaço volta quando forem apagados ({expected} esperados).";
     CliApplyAsk =>
         "These items move to quarantine (nothing is deleted; `wdc restore` puts them back). This needs proof that you are here.",
         "Estes itens vão para a quarentena (nada é apagado; `wdc restore` devolve). Isto precisa de prova de que você está aqui.";
@@ -820,6 +856,15 @@ messages! {
     ApplyRenameFailed =>
         "could not move it ({error}); nothing forced",
         "não foi possível mover ({error}); nada foi forçado";
+    ApplyOpenFailed =>
+        "could not open it ({error}); nothing forced",
+        "não foi possível abri-lo ({error}); nada foi forçado";
+    ApplyHeldOpen =>
+        "held open by {holders}; close it and run again",
+        "mantido aberto por {holders}; feche-o e rode de novo";
+    ApplyHeldOpenMany =>
+        "held open by {holders}; close them and run again",
+        "mantido aberto por {holders}; feche-os e rode de novo";
     ApplyNotAllowed =>
         "its real path {path} is not allowed: {why}",
         "o caminho real {path} não é permitido: {why}";
@@ -888,6 +933,9 @@ messages! {
     CliProgramsFirstLook =>
         "This is the first look: the list was saved. Run it again after an uninstall to see what the program left behind.",
         "Esta é a primeira consulta: a lista foi salva. Rode de novo depois de uma desinstalação para ver o que o programa deixou.";
+    ProgKeysUnreadable =>
+        "{n} uninstall key(s) could not be read, so folders left behind were not checked this time.",
+        "{n} chave(s) de desinstalação não puderam ser lidas, então as pastas deixadas para trás não foram verificadas desta vez.";
     AppProgramsQuietLabel =>
         "quiet uninstall:",
         "desinstalar em silêncio:";

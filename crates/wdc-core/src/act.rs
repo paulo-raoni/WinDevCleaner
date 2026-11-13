@@ -49,10 +49,16 @@ impl Forbid {
 /// Whether the tool may act on a path at all, whatever a rule says.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Verdict {
-    /// The allowed root the path is inside.
+    /// The allowed root the path is inside (the path itself when it is a root).
     pub allowed_root: Option<String>,
-    /// The path is an allowed root itself: only things inside a root can be items.
+    /// The path IS an allowed root, not a thing inside one: only things inside a root can be
+    /// items. Called `is_root_itself` on the wire; the Rust name stays.
+    #[serde(rename = "is_root_itself")]
     pub is_allowed_root: bool,
+    /// The path is strictly inside an allowed root (a root itself is not).
+    pub inside_allowed_root: bool,
+    /// The final path (links resolved) the verdict was given for.
+    pub checked_path: String,
     /// Why the path is forbidden, if it is.
     pub forbidden: Option<Forbid>,
 }
@@ -175,7 +181,7 @@ pub fn forbidden_reason(path: &str, is_dir: bool, ctx: &Context, data_dir: Optio
         let cache = rest.iter().any(|s| {
             ["cache", "code cache", "gpucache", "shadercache", "grshadercache", "dawncache"].contains(s)
         });
-        if !cache {
+        if !cache && is_browser_user_data(&p, &segs[..i], i) {
             return Some(Forbid::BrowserProfile);
         }
     }
@@ -193,7 +199,58 @@ pub fn forbidden_reason(path: &str, is_dir: bool, ctx: &Context, data_dir: Optio
     None
 }
 
+/// The browser vendors whose `User Data` folder is a browser profile store, by the segments above it.
+fn is_browser_vendor_parent(before: &[&str]) -> bool {
+    let n = before.len();
+    let last = before.last().copied().unwrap_or("");
+    let pair = if n >= 2 { (before[n - 2], last) } else { ("", last) };
+    matches!(pair, ("google", "chrome") | ("microsoft", "edge") | ("bravesoftware", "brave-browser"))
+        || ["vivaldi", "chromium", "opera software"].contains(&last)
+}
+
+/// What a look for Chromium's `Local State` file says: only a file that is certainly absent
+/// means "not a profile"; any other outcome, an error included, counts as a profile (fail safe).
+fn local_state_means_profile(look: std::io::Result<std::fs::Metadata>) -> bool {
+    match look {
+        Ok(_) => true,
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
+/// Whether the `User Data` folder at segment `i` of `p` (original case) is a browser profile
+/// store, not an application's own folder of that name: its parent is a known browser vendor's
+/// folder, or it holds Chromium's `Local State`. `before` is the lower-case segments above it.
+fn is_browser_user_data(p: &str, before: &[&str], i: usize) -> bool {
+    let mut profile = false;
+    // GUARD-BEGIN(profile-vendor)
+    profile |= is_browser_vendor_parent(before);
+    // GUARD-END(profile-vendor)
+    if !profile {
+        // The folder's own path: `p` up to the end of its segment `i`.
+        let mut pos = 0;
+        let mut seen = 0;
+        let mut end = p.len();
+        for part in p.split('\\') {
+            pos += part.len();
+            if !part.is_empty() {
+                if seen == i {
+                    end = pos;
+                    break;
+                }
+                seen += 1;
+            }
+            pos += 1;
+        }
+        let state = crate::rules::native(&format!("{}\\Local State", &p[..end]));
+        // GUARD-BEGIN(profile-local-state)
+        profile = local_state_means_profile(std::fs::symlink_metadata(state));
+        // GUARD-END(profile-local-state)
+    }
+    profile
+}
+
 /// The verdict for a final path.
+#[allow(unused_mut, unused_assignments)]
 pub fn verdict(final_path: &str, is_dir: bool, ctx: &Context, data_dir: Option<&str>) -> Verdict {
     let roots = allowed_roots(ctx);
     let p = lower(final_path);
@@ -204,7 +261,17 @@ pub fn verdict(final_path: &str, is_dir: bool, ctx: &Context, data_dir: Option<&
         .filter(|r| is_under(final_path, r))
         .max_by_key(|r| r.len())
         .cloned();
-    Verdict { allowed_root, is_allowed_root, forbidden: forbidden_reason(final_path, is_dir, ctx, data_dir) }
+    let mut inside_allowed_root = false;
+    // GUARD-BEGIN(inside-allowed-root)
+    inside_allowed_root = allowed_root.is_some() && !is_allowed_root;
+    // GUARD-END(inside-allowed-root)
+    Verdict {
+        allowed_root,
+        is_allowed_root,
+        inside_allowed_root,
+        checked_path: final_path.to_string(),
+        forbidden: forbidden_reason(final_path, is_dir, ctx, data_dir),
+    }
 }
 
 #[cfg(test)]
