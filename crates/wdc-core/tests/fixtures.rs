@@ -378,13 +378,15 @@ fn an_item_with_an_unreadable_subfolder_is_partial_and_left_out_of_the_plan() {
     std::fs::create_dir_all(&denied).unwrap();
     write_file(&denied.join("secret.bin"), MIB);
     write_file(&item.join("readable.bin"), 5000);
-    deny_listing(&denied);
-    // The fixture's own precondition, not a guarded line: if the deny did not take effect in this
+    // Held open with no sharing for the whole test: no process can list it, whatever its privileges
+    // (an ACL deny did not stop listing in every CI job).
+    let held = hold_dir_exclusive(&denied);
+    // The fixture's own precondition, not a guarded line: if the hold did not take effect in this
     // process, a failure below is a fixture problem and not a product defect.
     let listing = std::fs::read_dir(&denied).map(|_| ());
     assert!(
         listing.is_err(),
-        "FIXTURE: icacls reported success but this process can still list {}; the fixture could not deny access (not a product defect)",
+        "FIXTURE: the exclusive hold is in place but this process can still list {}; the fixture could not make the folder unreadable (not a product defect)",
         denied.display()
     );
 
@@ -396,16 +398,16 @@ fn an_item_with_an_unreadable_subfolder_is_partial_and_left_out_of_the_plan() {
     let opts = wdc_core::plan::DraftOptions { paths: vec![item.to_string_lossy().into_owned()], ..Default::default() };
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let d = wdc_core::plan::draft(&opts, &rules, &ctx, Some(&data.to_string_lossy()), now);
-    allow_listing(&denied);
+    drop(held);
 
     guard_assert!("explain-complete", !e.complete, "an unreadable subfolder makes the size incomplete");
     assert!(e.bytes_on_disk > 0, "the readable part is still measured");
     assert!(e.errors >= 1, "{e:?}");
-    assert_eq!(e.first_error_kind, Some("access-denied"));
+    assert_eq!(e.first_error_kind, Some("in-use"));
     assert!(e.partial_line(wdc_core::i18n::Lang::En).unwrap().starts_with("Partial: "));
     let json = serde_json::to_value(&e).unwrap();
     assert_eq!(json["complete"], false);
-    assert_eq!(json["first_error_kind"], "access-denied");
+    assert_eq!(json["first_error_kind"], "in-use");
     let left_out = d.not_included.iter().find(|n| n.path.ends_with("DXCache"));
     guard_assert!(
         "plan-complete",

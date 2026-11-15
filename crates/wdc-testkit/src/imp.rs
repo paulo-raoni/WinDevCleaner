@@ -142,43 +142,33 @@ pub fn add_attributes(path: &Path, attrs: u32) {
     assert!(ok != 0, "SetFileAttributesW: {}", std::io::Error::last_os_error());
 }
 
-/// The SID of the user this process runs as, as `whoami /user` prints it.
-fn current_user_sid() -> String {
-    let out = Command::new("whoami").args(["/user", "/fo", "csv", "/nh"]).output().unwrap();
-    assert!(out.status.success(), "whoami: {}", String::from_utf8_lossy(&out.stderr));
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-    // "DOMAIN\\name","S-1-5-21-..."
-    let sid = text.trim().rsplit(',').next().unwrap_or("").trim_matches('"').to_string();
-    assert!(sid.starts_with("S-1-"), "whoami /user gave no SID: {text}");
-    sid
-}
-
-/// Denies listing a folder to the process that runs the test: Everyone, the user's own SID and the
-/// Administrators group (an elevated token carries it), with inheritance removed so no inherited
-/// grant is left. (The elevated runner's backup privilege is disabled by default, so this applies to
-/// the tests too.)
+/// Denies listing a folder to Everyone (the elevated runner's backup privilege is disabled
+/// by default, so this applies to the tests too).
 pub fn deny_listing(dir: &Path) {
-    let user = format!("*{}:(RD)", current_user_sid());
-    let out = Command::new("icacls").arg(dir).arg("/inheritance:r").output().unwrap();
-    assert!(out.status.success(), "icacls /inheritance:r: {}", String::from_utf8_lossy(&out.stdout));
-    let out = Command::new("icacls")
-        .arg(dir)
-        .args(["/deny", "*S-1-1-0:(RD)", "*S-1-5-32-544:(RD)"])
-        .arg(&user)
-        .output()
-        .unwrap();
+    let out = Command::new("icacls").arg(dir).args(["/deny", "*S-1-1-0:(RD)"]).output().unwrap();
     assert!(out.status.success(), "icacls: {}", String::from_utf8_lossy(&out.stdout));
 }
 
 pub fn allow_listing(dir: &Path) {
-    let user = format!("*{}", current_user_sid());
-    let _ = Command::new("icacls").arg(dir).args(["/remove:d", "*S-1-1-0", "*S-1-5-32-544"]).arg(&user).output();
-    let _ = Command::new("icacls").arg(dir).arg("/inheritance:e").output();
+    let _ = Command::new("icacls").arg(dir).args(["/remove:d", "*S-1-1-0"]).output();
 }
 
 /// Opens a file with no sharing at all, as a program holding it exclusively would.
 pub fn hold_exclusive(path: &Path) -> File {
     OpenOptions::new().read(true).write(true).share_mode(0).open(path).expect("open exclusively")
+}
+
+/// Opens a folder with no sharing at all, as a program holding it exclusively would: every other open
+/// of it, by any process whatever its privileges, fails with a sharing violation until the returned
+/// handle is dropped (which closes it).
+pub fn hold_dir_exclusive(path: &Path) -> File {
+    // FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS (needed to open a directory), share mode 0.
+    OpenOptions::new()
+        .access_mode(0x1)
+        .share_mode(0)
+        .custom_flags(0x0200_0000)
+        .open(path)
+        .expect("open the folder exclusively")
 }
 
 /// Size facts read from the file itself through a handle (the oracle for the scanner).
