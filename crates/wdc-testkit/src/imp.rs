@@ -158,6 +158,19 @@ pub fn hold_exclusive(path: &Path) -> File {
     OpenOptions::new().read(true).write(true).share_mode(0).open(path).expect("open exclusively")
 }
 
+/// Opens a folder with no sharing at all, as a program holding it exclusively would: every other open
+/// of it, by any process whatever its privileges, fails with a sharing violation until the returned
+/// handle is dropped (which closes it).
+pub fn hold_dir_exclusive(path: &Path) -> File {
+    // FILE_LIST_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS (needed to open a directory), share mode 0.
+    OpenOptions::new()
+        .access_mode(0x1)
+        .share_mode(0)
+        .custom_flags(0x0200_0000)
+        .open(path)
+        .expect("open the folder exclusively")
+}
+
 /// Size facts read from the file itself through a handle (the oracle for the scanner).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HandleFacts {
@@ -384,14 +397,15 @@ pub fn try_open(name: &str, access: u32) -> Result<(), u32> {
     }
 }
 
-/// Path to a binary built in the same target folder as the running test.
+/// Path to a binary built in the same target folder as the running test: the first
+/// `<ancestor>\<name>.exe` of the test executable that exists, whether cargo put the test
+/// under `deps\` or under `build\<package>\<hash>\out\`.
 pub fn target_bin(name: &str) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    // target\<profile>\deps\test.exe -> target\<profile>\<name>.exe
-    let dir = exe.parent().unwrap().parent().unwrap();
-    let p = dir.join(format!("{name}.exe"));
-    assert!(p.exists(), "{} is not built; run `cargo build` for the workspace first", p.display());
-    p
+    match crate::find_in_ancestors(&exe, &format!("{name}.exe")) {
+        Ok(p) => p,
+        Err(first) => panic!("{} is not built; run `cargo build` for the workspace first", first.display()),
+    }
 }
 
 /// Waits until a named pipe has a listening instance, without connecting to it.

@@ -544,3 +544,67 @@ fn temp_old_needs_seven_days_and_the_temp_folder_is_never_an_item() {
     assert!(!e.actionable);
     wdc_testkit::remove_tree(&f.base);
 }
+
+/// `User Data` folders: a browser's profile store is forbidden, an application's own folder of
+/// that name is not.
+fn user_data_verdict(f: &Fixture, path: &Path) -> Option<wdc_core::act::Forbid> {
+    wdc_core::act::forbidden_reason(&s(path), true, &f.ctx(&[], None), None)
+}
+
+#[test]
+fn an_apps_own_user_data_folder_without_local_state_is_not_a_browser_profile() {
+    let f = Fixture::new("userdata-app");
+    let download = f.local.join("CapCut").join("User Data").join("Download").join("clip");
+    std::fs::create_dir_all(&download).unwrap();
+    assert_eq!(user_data_verdict(&f, &download), None);
+    assert_eq!(user_data_verdict(&f, &f.local.join("CapCut").join("User Data")), None);
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn a_user_data_folder_holding_local_state_is_a_browser_profile() {
+    let f = Fixture::new("userdata-local-state");
+    let data = f.local.join("SomeChromium").join("User Data");
+    write(&data.join("Local State"), 1024);
+    std::fs::create_dir_all(data.join("Default").join("Extensions")).unwrap();
+    let verdict = user_data_verdict(&f, &data.join("Default").join("Extensions"));
+    guard_assert!("profile-local-state", verdict == Some(wdc_core::act::Forbid::BrowserProfile), "{verdict:?}");
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn a_known_vendors_user_data_folder_is_a_browser_profile_without_local_state() {
+    let f = Fixture::new("userdata-vendor");
+    let mut missed = Vec::new();
+    for vendor in [
+        &["Google", "Chrome"][..],
+        &["Microsoft", "Edge"],
+        &["BraveSoftware", "Brave-Browser"],
+        &["Vivaldi"],
+        &["Chromium"],
+        &["Opera Software"],
+    ] {
+        let mut dir = f.local.clone();
+        for part in vendor {
+            dir = dir.join(part);
+        }
+        let history = dir.join("User Data").join("Default").join("History");
+        if user_data_verdict(&f, &history) != Some(wdc_core::act::Forbid::BrowserProfile) {
+            missed.push(vendor.join("\\"));
+        }
+    }
+    guard_assert!("profile-vendor", missed.is_empty(), "not forbidden without Local State: {missed:?}");
+    // A vendor name is not enough on its own: only the exact parent counts.
+    assert_eq!(user_data_verdict(&f, &f.local.join("Google").join("Earth").join("User Data").join("x")), None);
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn a_local_state_that_cannot_be_looked_up_counts_as_a_profile() {
+    let f = Fixture::new("userdata-error");
+    // A name with a NUL byte: the lookup fails with an error that is not "not found".
+    let path = format!("{}\\bad\0name\\User Data\\Download\\x", s(&f.local));
+    let verdict = wdc_core::act::forbidden_reason(&path, true, &f.ctx(&[], None), None);
+    guard_assert!("profile-local-state", verdict == Some(wdc_core::act::Forbid::BrowserProfile), "{verdict:?}");
+    wdc_testkit::remove_tree(&f.base);
+}

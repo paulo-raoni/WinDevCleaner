@@ -18,10 +18,14 @@ proves it.
 
 ## 1 · The two roles
 
-- **The REVIEWER** authors the task, reviews the result against the DIFF, runs the independent
-  pass, greps for secrets, commits its own process documents, pushes, opens the pull request,
-  watches CI, and merges when the owner asks. The reviewer also authors DECISION and PROCESS
-  documents: this file, the plan, CI configuration.
+- **The REVIEWER** writes task files only (and the handoff in `.omc/`, which is outside git). It
+  authors the task, reviews the result against the DIFF, runs the independent pass, greps for
+  secrets, pushes, opens the pull request, watches CI, and merges when the owner asks. Every file of
+  the repository, including this file, the plan, the `.github/` workflows, the `ci/` scripts and the
+  installer, is written by an executor from a task file: the reviewer decides its content and
+  specifies it in a task file.
+- Why (the owner, 2026-11-11): stop developing in the chat; send the subagents following the
+  workflow.
 - **The EXECUTOR** writes the code, the tests and the documentation that describes code.
 
 **The reviewer never implements, not one line.** **Nobody approves what they wrote:** the context
@@ -137,6 +141,7 @@ for it.
 | Windows code compiles | `cargo clippy --target x86_64-pc-windows-msvc` locally; CI job "build, fixtures, MSI" |
 | No secret in the repository | the reviewer's grep of the diff before each push (written) |
 | No AI attribution, no weakened test, the reviewer never implements, one-line dispatch | written |
+| The reviewer writes no repository file | written |
 
 **Shapes.** The harness `templates/` (task, fix, audit, pull request, handoff) are a guide for the
 files of section 2, taken where they help; neither of their modules applies here (no endpoints,

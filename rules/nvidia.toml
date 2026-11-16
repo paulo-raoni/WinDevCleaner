@@ -5,16 +5,17 @@ id = "nvidia-ota-artifacts"
 title = "NVIDIA app update artifact"
 title_pt_br = "Artefato de atualização do app NVIDIA"
 class = "install-leftover"
-# Report-only in version 1: removing it needs administrator rights.
+# Report-only in version 1: removing it may need administrator rights.
 action = "report-only"
 paths = ['%ProgramData%\NVIDIA Corporation\NVIDIA app\UpdateFramework\ota-artifacts\*']
 evidence = "Downloaded driver and app packages. One whose driver version is equal to or older than the installed driver was already installed; a newer one may be a pending update."
 evidence_pt_br = "Pacotes de driver e do app baixados. Um cuja versão de driver é igual ou anterior ao driver instalado já foi instalado; um mais novo pode ser uma atualização pendente."
-source = "Observed on the owner's machine on 2026-11-07: 3.7 GB in ota-artifacts."
+source = "The NVIDIA app's update framework downloads its packages to `UpdateFramework\\ota-artifacts`."
+source_pt_br = "O framework de atualização do app NVIDIA baixa seus pacotes para `UpdateFramework\\ota-artifacts`."
 cost = "None for packages already installed; the NVIDIA app downloads again what it needs."
 cost_pt_br = "Nenhum para pacotes já instalados; o app NVIDIA baixa de novo o que precisar."
-instructions = "Needs an administrator: in an administrator terminal, delete the artifact folder shown here, only when its version is not newer than the installed driver."
-instructions_pt_br = "Precisa de administrador: num terminal de administrador, apague a pasta de artefato mostrada aqui, só quando a versão não for mais nova que o driver instalado."
+instructions = "May need an administrator: in an administrator terminal if a normal one is refused, delete the artifact folder shown here, only when its version is not newer than the installed driver."
+instructions_pt_br = "Pode precisar de administrador: num terminal de administrador, se um comum for recusado, apague a pasta de artefato mostrada aqui, só quando a versão não for mais nova que o driver instalado."
 last_verified = "2026-11-07"
 
 [[rule.require]]
@@ -31,6 +32,7 @@ paths = ['%LOCALAPPDATA%\NVIDIA\DXCache', '%LOCALAPPDATA%\NVIDIA\GLCache', '%APP
 evidence = "Compiled shaders; games and GPU apps compile them again when needed. While a game or GPU app holds a file in the folder, the folder is left in place: close it and run again."
 evidence_pt_br = "Shaders compilados; jogos e apps de GPU compilam de novo quando precisam. Enquanto um jogo ou app de GPU mantém um arquivo da pasta aberto, a pasta fica onde está: feche-o e rode de novo."
 source = "NVIDIA app documentation of the shader cache size setting."
+source_pt_br = "Documentação do app NVIDIA sobre a configuração do tamanho do cache de shaders."
 cost = "Shaders recompile: the first launch of each game stutters."
 cost_pt_br = "Os shaders são recompilados: a primeira abertura de cada jogo engasga."
 instructions = "The lasting fix is the \"Shader Cache Size\" setting in the NVIDIA app (Graphics > Global settings)."

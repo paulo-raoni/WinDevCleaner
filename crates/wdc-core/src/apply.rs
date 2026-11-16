@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::act;
 use crate::explain::WhyNot;
-use crate::fsops::{self, OpError};
+use crate::fsops::{self, Holder, HolderProbe, OpError};
 use crate::plan::{Plan, PlanItem, PlanRefusal};
 use crate::presence::Proof;
 use crate::quarantine::{self, Entry, PurgeReport, QuarantineError, VolumeMeasure};
@@ -38,7 +38,13 @@ pub enum Skip {
     NotActionable { why: WhyNot },
     ConditionFailed { condition: Condition, found: Found },
     Quarantine { error: QuarantineError },
+    /// The item could not be opened (before anything was decided about it).
+    OpenFailed { error: OpError },
+    /// The item was opened but the rename into quarantine failed.
     RenameFailed { error: OpError },
+    /// Another program has the item, or a file inside it, open. `stage` says where Windows
+    /// refused: `open` (the item) or `rename` (a file under a folder). Nothing was forced.
+    HeldOpen { stage: &'static str, error: OpError, holders: Vec<Holder> },
 }
 
 impl Skip {
@@ -56,7 +62,12 @@ impl Skip {
             Skip::NotActionable { why } => why.text(lang),
             Skip::ConditionFailed { found, .. } => lang.fmt(Msg::WhyCondition, &[("found", &found.text(lang))]),
             Skip::Quarantine { error } => lang.fmt(Msg::ApplyQuarantineUnsafe, &[("detail", &format!("{error:?}"))]),
+            Skip::OpenFailed { error } => lang.fmt(Msg::ApplyOpenFailed, &[("error", error.kind)]),
             Skip::RenameFailed { error } => lang.fmt(Msg::ApplyRenameFailed, &[("error", error.kind)]),
+            Skip::HeldOpen { holders, .. } => {
+                let msg = if fsops::holder_name_count(holders) > 1 { Msg::ApplyHeldOpenMany } else { Msg::ApplyHeldOpen };
+                lang.fmt(msg, &[("holders", &fsops::holder_names(holders))])
+            }
         }
     }
 }
@@ -86,6 +97,11 @@ pub struct ApplyReport {
     pub moved: usize,
     pub skipped: usize,
     pub moved_bytes: u64,
+    /// Size on disk of the items that were not moved.
+    pub skipped_bytes: u64,
+    /// Size on disk of what `purge_now` deleted for good; absent when nothing was purged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purged_bytes: Option<u64>,
     /// Expected freed by a later purge of what was moved.
     pub expected_freed_bytes: u64,
     /// Free space around the moves (a rename frees nothing).
@@ -116,13 +132,34 @@ fn why_not_allowed(v: &act::Verdict) -> Option<WhyNot> {
     None
 }
 
+/// What a refusal by Windows means for `path`: held open when the error is access denied or a
+/// sharing violation and the probe names who holds it; otherwise the plain failure. Nothing is
+/// closed, signalled or forced either way.
+#[allow(unused_mut, unused_assignments)]
+fn refused(path: &Path, stage: &'static str, error: OpError, probe: &HolderProbe) -> Skip {
+    if error.may_be_held() {
+        let mut holders = Vec::new();
+        // GUARD-BEGIN(apply-held)
+        holders = probe.probe(path).unwrap_or_default();
+        // GUARD-END(apply-held)
+        if !holders.is_empty() {
+            return Skip::HeldOpen { stage, error, holders };
+        }
+    }
+    if stage == "open" {
+        Skip::OpenFailed { error }
+    } else {
+        Skip::RenameFailed { error }
+    }
+}
+
 /// Checks one item on its open handle. Returns the open item when it may be moved.
 #[allow(unused_mut, unused_assignments)]
-fn check(item: &PlanItem, rules: &RuleSet, ctx: &Context, data_dir: &str) -> Result<(fsops::OpenItem, Class), Skip> {
+fn check(item: &PlanItem, rules: &RuleSet, ctx: &Context, data_dir: &str, probe: &HolderProbe) -> Result<(fsops::OpenItem, Class), Skip> {
     let open = match fsops::open_item(&native(&item.path)) {
         Ok(o) => o,
         Err(e) if e.kind == "not-found" => return Err(Skip::Missing),
-        Err(e) => return Err(Skip::RenameFailed { error: e }),
+        Err(e) => return Err(refused(&native(&item.path), "open", e, probe)),
     };
     // GUARD-BEGIN(apply-link)
     if open.is_link {
@@ -197,16 +234,17 @@ pub fn apply(
     }
     let _ = std::fs::create_dir_all(data_dir);
     let data = data_dir.to_string_lossy().into_owned();
+    let probe = HolderProbe::default();
     let measure: Vec<(String, u64)> = plan.items.iter().map(|i| (i.path.clone(), 0)).collect();
     let (items, volumes) = quarantine::measured(&measure, || {
         let mut out = Vec::new();
         let mut entries = Vec::new();
         for (n, item) in plan.items.iter().enumerate() {
-            let result = check(item, rules, ctx, &data).and_then(|(open, class)| {
+            let result = check(item, rules, ctx, &data, &probe).and_then(|(open, class)| {
                 let base = quarantine::base_for(&open.final_path, data_dir);
                 let q = quarantine::prepare(&base, plan.short_hash()).map_err(|error| Skip::Quarantine { error })?;
                 let target = quarantine::free_slot(&q, n);
-                fsops::rename(&open, &target).map_err(|error| Skip::RenameFailed { error })?;
+                fsops::rename(&open, &target).map_err(|error| refused(Path::new(&open.final_path), "rename", error, &probe))?;
                 let stored = fsops::final_path(&target).unwrap_or_else(|| target.to_string_lossy().into_owned());
                 Ok(Entry {
                     id: format!("{}-{}", &plan.hash[..8], target.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default()),
@@ -249,6 +287,7 @@ pub fn apply(
     let moved: Vec<&Entry> = items.iter().filter_map(|i| i.moved.as_ref()).collect();
     let moved_ids: Vec<String> = moved.iter().map(|e| e.id.clone()).collect();
     let moved_bytes = moved.iter().map(|e| e.bytes_on_disk).sum();
+    let skipped_bytes = plan.items.iter().zip(&items).filter(|(_, o)| o.moved.is_none()).map(|(i, _)| i.bytes_on_disk).sum();
     let expected_freed_bytes = moved.iter().map(|e| e.expected_freed_bytes).sum();
     let purge = (opts.purge_now && !moved_ids.is_empty())
         .then(|| quarantine::purge(data_dir, Some(&moved_ids), true, now_secs, proof));
@@ -258,6 +297,8 @@ pub fn apply(
         skipped: items.len() - moved_ids.len(),
         items,
         moved_bytes,
+        skipped_bytes,
+        purged_bytes: purge.as_ref().map(|p| p.purged_bytes),
         expected_freed_bytes,
         volumes,
         purge,

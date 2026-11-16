@@ -606,3 +606,278 @@ fn early_purge_follows_the_class_of_every_quarantine_rule() {
         wdc_testkit::remove_tree(&f.base);
     }
 }
+
+// ---- the true size of every item, and a size that is incomplete (rc.2, task 1) ----
+
+/// A fake user under `base`, with the clock far enough ahead for `temp-old` (older than 7 days).
+fn temp_ctx(base: &Path) -> Context {
+    let mut c = ctx_for(base);
+    c.now = std::time::SystemTime::now() + std::time::Duration::from_secs(9 * 86_400);
+    c
+}
+
+fn temp_dir(base: &Path) -> PathBuf {
+    let t = local(base).join("Temp");
+    std::fs::create_dir_all(&t).unwrap();
+    t
+}
+
+fn draft_of(base: &Path, item: &Path) -> wdc_core::plan::Draft {
+    let data = base.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let opts = DraftOptions { paths: vec![item.to_string_lossy().into_owned()], ..Default::default() };
+    draft(&opts, &RuleSet::built_in(), &temp_ctx(base), Some(&data.to_string_lossy()), now())
+}
+
+#[test]
+fn explain_of_a_file_reports_its_allocation_and_one_file() {
+    let base = fresh_dir("file-explain");
+    let file = temp_dir(&base).join("update.bin");
+    write(&file, 24_576);
+    let e = wdc_core::explain::explain(&file.to_string_lossy(), &RuleSet::built_in(), &temp_ctx(&base), None);
+    assert_eq!(e.kind, "file");
+    guard_assert!("file-root-size", e.bytes_on_disk >= 24_576, "the file's allocation is reported, got {}", e.bytes_on_disk);
+    assert_eq!(e.logical_bytes, 24_576);
+    assert_eq!(e.files, 1);
+    assert!(e.complete && e.errors == 0 && e.first_error_kind.is_none());
+    let json = serde_json::to_value(&e).unwrap();
+    assert!(json["bytes_on_disk"].as_u64().unwrap() > 0);
+    assert_eq!(json["files"], 1);
+    assert_eq!(json["complete"], true);
+    assert!(json.get("first_error_kind").is_none(), "absent when complete");
+    assert!(e.size_line(wdc_core::i18n::Lang::En).ends_with("in 1 file."), "{}", e.size_line(wdc_core::i18n::Lang::En));
+    assert!(e.size_line(wdc_core::i18n::Lang::PtBr).ends_with("em 1 arquivo."));
+    assert!(e.partial_line(wdc_core::i18n::Lang::En).is_none());
+    wdc_testkit::remove_tree(&base);
+}
+
+#[test]
+fn a_temp_old_file_item_goes_through_the_plan_with_its_real_size() {
+    let base = fresh_dir("file-plan");
+    let file = temp_dir(&base).join("update.exe");
+    write(&file, 24_576);
+    let d = draft_of(&base, &file);
+    let offered = d.plan.items.first().map_or(0, |i| i.bytes_on_disk);
+    guard_assert!("file-root-size", offered >= 24_576, "the plan offers the file with its size, got {offered}: {:#?}", d.not_included);
+    assert_eq!(d.plan.items.len(), 1, "{:#?}", d.not_included);
+    let i = &d.plan.items[0];
+    assert_eq!(i.rule_id, "temp-old");
+    assert!(!i.is_dir);
+    assert_eq!(i.expected_freed_bytes, i.bytes_on_disk);
+    assert_eq!(i.files, 1);
+    assert_eq!(d.plan.bytes_on_disk(), i.bytes_on_disk);
+    wdc_testkit::remove_tree(&base);
+}
+
+#[test]
+fn a_file_with_a_second_name_outside_the_item_reports_expected_freed_zero() {
+    let base = fresh_dir("file-linked");
+    let file = temp_dir(&base).join("shared.bin");
+    write(&file, 8192);
+    let other = base.join("elsewhere").join("shared-too.bin");
+    std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+    std::fs::hard_link(&file, &other).unwrap();
+    let e = wdc_core::explain::explain(&file.to_string_lossy(), &RuleSet::built_in(), &temp_ctx(&base), None);
+    assert!(e.bytes_on_disk >= 8192, "the file is measured: {}", e.bytes_on_disk);
+    assert_eq!(e.hard_links.len(), 1, "{:#?}", e.hard_links);
+    guard_assert_eq!("expected-freed", e.expected_freed_bytes, 0, "the file frees nothing while its other name exists");
+    wdc_testkit::remove_tree(&base);
+}
+
+#[test]
+fn a_zero_byte_item_is_left_out_as_nothing_to_free() {
+    let base = fresh_dir("zero");
+    let file = temp_dir(&base).join("empty.tmp");
+    write(&file, 0);
+    let d = draft_of(&base, &file);
+    let left_out = d.not_included.iter().find(|n| n.path.ends_with("empty.tmp"));
+    guard_assert!("plan-nothing", d.plan.items.is_empty() && left_out.is_some(), "the 0-byte item is not offered: {:#?}", d.plan.items);
+    let why = &left_out.unwrap().why_not;
+    assert_eq!(why, &vec![wdc_core::explain::WhyNot::NothingToFree]);
+    assert_eq!(serde_json::to_value(&why[0]).unwrap()["reason"], "nothing-to-free");
+    let (en, pt) = (why[0].text(wdc_core::i18n::Lang::En), why[0].text(wdc_core::i18n::Lang::PtBr));
+    assert!(!en.is_empty() && !pt.is_empty() && en != pt);
+    wdc_testkit::remove_tree(&base);
+}
+
+#[test]
+fn the_reason_codes_of_the_two_new_exclusions_are_stable() {
+    use wdc_core::explain::WhyNot;
+    assert_eq!(serde_json::to_value(WhyNot::NotFullyReadable).unwrap()["reason"], "not-fully-readable");
+    assert_eq!(serde_json::to_value(WhyNot::NothingToFree).unwrap()["reason"], "nothing-to-free");
+    for w in [WhyNot::NotFullyReadable, WhyNot::NothingToFree] {
+        assert_ne!(w.text(wdc_core::i18n::Lang::En), w.text(wdc_core::i18n::Lang::PtBr));
+    }
+}
+
+/// An item that is both incomplete and 0 bytes is left out as not-fully-readable: its size is
+/// unknown, so "nothing to free" would state a size nobody measured. The cloud session runs as
+/// root and cannot make a portable item with an unreadable part, so the decision `draft` takes is
+/// tested where it is made, with the two facts given directly.
+#[test]
+fn an_incomplete_item_that_also_frees_nothing_is_left_out_as_not_fully_readable() {
+    use wdc_core::explain::WhyNot;
+    use wdc_core::plan::left_out_for_size;
+    assert_eq!(left_out_for_size(false, 0), Some(WhyNot::NotFullyReadable), "incomplete and 0 bytes: the incomplete reason wins");
+    assert_eq!(left_out_for_size(false, 4096), Some(WhyNot::NotFullyReadable));
+    assert_eq!(left_out_for_size(true, 0), Some(WhyNot::NothingToFree));
+    assert_eq!(left_out_for_size(true, 4096), None);
+}
+
+/// The Restart Manager may reject a directory, which would make every folder probe fail: a
+/// folder registers only its files (within the cap), a file registers itself.
+#[test]
+fn the_holder_probe_registers_a_file_itself_and_a_folder_only_through_its_files() {
+    let base = fresh_dir("probe-files");
+    let folder = base.join("cache");
+    std::fs::create_dir_all(folder.join("sub")).unwrap();
+    for (i, d) in [&folder, &folder.join("sub")].into_iter().enumerate() {
+        for f in 0..3 {
+            std::fs::write(d.join(format!("f{i}{f}.bin")), b"x").unwrap();
+        }
+    }
+    let all = wdc_core::fsops::probe_files(&folder, 100);
+    assert_eq!(all.len(), 6, "{all:?}");
+    assert!(!all.contains(&folder) && all.iter().all(|p| p.is_file()), "{all:?}");
+    assert_eq!(wdc_core::fsops::probe_files(&folder, 4).len(), 4, "capped");
+    let one = folder.join("f00.bin");
+    assert_eq!(wdc_core::fsops::probe_files(&one, 4), vec![one.clone()]);
+    assert!(wdc_core::fsops::probe_files(&base.join("missing"), 4).is_empty());
+    wdc_testkit::remove_tree(&base);
+}
+
+// ---- items another program holds open, and folders with recent content (rc.2, task 2) ----
+
+fn fake_holders() -> Vec<wdc_core::fsops::Holder> {
+    vec![
+        wdc_core::fsops::Holder { pid: 4242, name: "NVIDIA Container".into() },
+        wdc_core::fsops::Holder { pid: 4343, name: "NVIDIA Overlay".into() },
+    ]
+}
+
+#[test]
+fn a_cache_folder_another_program_holds_open_is_left_out_naming_the_holders() {
+    use wdc_core::explain::WhyNot;
+    use wdc_core::fsops::HolderProbe;
+    use wdc_core::i18n::Lang;
+    let f = fixture("flow-held-plan");
+    let rules = RuleSet::built_in();
+    let data = f.data.to_string_lossy().into_owned();
+    let draft_with = |probe: HolderProbe| {
+        let opts = DraftOptions { paths: vec![f.cache.to_string_lossy().into_owned()], holders: probe, ..Default::default() };
+        draft(&opts, &rules, &f.ctx, Some(&data), now())
+    };
+
+    // Controls that do not depend on the exclusion: nobody holds it, or the probe itself fails.
+    let free = draft_with(HolderProbe::new(|_| Some(Vec::new())));
+    assert_eq!(free.plan.items.len(), 1, "nobody holds it: {:#?}", free.not_included);
+    let failed = draft_with(HolderProbe::new(|_| None));
+    assert_eq!(failed.plan.items.len(), 1, "a probe that fails keeps the item: {:#?}", failed.not_included);
+    assert!(failed.not_included.is_empty(), "and says nothing: {:#?}", failed.not_included);
+
+    // Held by two programs.
+    let held = draft_with(HolderProbe::new(|_| Some(fake_holders())));
+    let why = held.not_included.iter().find(|n| n.path.ends_with("CachedData")).map(|n| n.why_not.clone());
+    guard_assert!(
+        "plan-held",
+        held.plan.items.is_empty() && why == Some(vec![WhyNot::HeldOpen { holders: fake_holders() }]),
+        "a held folder is left out as held-open with its holders: items {:?}, left out {:#?}",
+        held.plan.items.len(),
+        held.not_included
+    );
+    let why = why.unwrap();
+    assert_eq!(serde_json::to_value(&why[0]).unwrap()["reason"], "held-open");
+    assert_eq!(serde_json::to_value(&why[0]).unwrap()["holders"][0]["pid"], 4242);
+    assert_eq!(why[0].text(Lang::En), "held open by: NVIDIA Container, NVIDIA Overlay. Close them and draft again.");
+    assert_eq!(why[0].text(Lang::PtBr), "mantido aberto por: NVIDIA Container, NVIDIA Overlay. Feche-os e gere o plano de novo.");
+    // One holder: the singular.
+    let one = vec![wdc_core::fsops::Holder { pid: 7, name: "NVIDIA Container".into() }];
+    let one = WhyNot::HeldOpen { holders: one };
+    assert_eq!(one.text(Lang::En), "held open by: NVIDIA Container. Close it and draft again.");
+    assert_eq!(one.text(Lang::PtBr), "mantido aberto por: NVIDIA Container. Feche-o e gere o plano de novo.");
+    wdc_testkit::remove_tree(&f.base);
+}
+
+#[test]
+fn held_open_and_open_failed_skips_read_in_both_languages_and_stay_distinct_in_json() {
+    use wdc_core::fsops::OpError;
+    use wdc_core::i18n::Lang;
+    let held = Skip::HeldOpen { stage: "rename", error: OpError::from_code(5), holders: fake_holders() };
+    assert_eq!(held.text(Lang::En), "held open by NVIDIA Container, NVIDIA Overlay; close them and run again");
+    let one = Skip::HeldOpen { stage: "open", error: OpError::from_code(32), holders: fake_holders()[..1].to_vec() };
+    assert_eq!(one.text(Lang::En), "held open by NVIDIA Container; close it and run again");
+    assert_eq!(one.text(Lang::PtBr), "mantido aberto por NVIDIA Container; feche-o e rode de novo");
+    let j = serde_json::to_value(&held).unwrap();
+    assert_eq!((j["reason"].as_str(), j["stage"].as_str(), j["holders"][1]["name"].as_str()), (Some("held-open"), Some("rename"), Some("NVIDIA Overlay")));
+    let open = serde_json::to_value(Skip::OpenFailed { error: OpError::from_code(5) }).unwrap();
+    let rename = serde_json::to_value(Skip::RenameFailed { error: OpError::from_code(5) }).unwrap();
+    assert_eq!((open["reason"].as_str(), rename["reason"].as_str()), (Some("open-failed"), Some("rename-failed")));
+    assert!(Skip::OpenFailed { error: OpError::from_code(5) }.text(Lang::PtBr).contains("abri"));
+}
+
+#[test]
+fn the_free_space_line_after_a_move_says_the_items_are_in_quarantine() {
+    use wdc_core::i18n::{Lang, Msg};
+    let args = [("volume", "C:\\"), ("before", "12.2 GiB"), ("after", "12.2 GiB"), ("measured", "-16.0 KiB"), ("expected", "148 MB")];
+    let en = Lang::En.fmt(Msg::CliFreeSpaceMoved, &args);
+    let pt = Lang::PtBr.fmt(Msg::CliFreeSpaceMoved, &args);
+    assert!(en.contains("in quarantine, not deleted") && en.contains("when they are purged (148 MB expected)"), "{en}");
+    assert!(pt.contains("na quarentena, não foram apagados") && pt.contains("(148 MB esperados)"), "{pt}");
+    assert!(!en.contains("expected 0") && !pt.contains("esperado 0"));
+}
+
+/// Sets the modified time of a file (a future time stands for "changed recently" when the
+/// clock of the test is moved ahead).
+fn touch(p: &Path, t: std::time::SystemTime) {
+    std::fs::OpenOptions::new().write(true).open(p).unwrap().set_modified(t).unwrap();
+}
+
+#[test]
+fn a_temp_folder_with_recent_content_is_not_offered_and_an_old_one_is() {
+    use wdc_core::explain::WhyNot;
+    let base = fresh_dir("temp-recent");
+    let t = temp_dir(&base);
+    let recent = t.join("DiagOutputDir");
+    write(&recent.join("old.etl"), 8192);
+    write(&recent.join("logs").join("deep").join("trace.etl"), 8192);
+    let quiet = t.join("quiet");
+    write(&quiet.join("a").join("b.tmp"), 8192);
+    // The test clock is 9 days ahead of the real one. A file changed 3 days ahead of the real
+    // clock is 6 days old to the rule: under the 7 days, though the folder itself is 9 days old.
+    let ahead = |days: u64| std::time::SystemTime::now() + std::time::Duration::from_secs(days * 86_400);
+    touch(&recent.join("logs").join("deep").join("trace.etl"), ahead(3));
+
+    let d_quiet = draft_of(&base, &quiet);
+    assert_eq!(d_quiet.plan.items.len(), 1, "a folder where nothing is recent is still offered: {:#?}", d_quiet.not_included);
+    let d = draft_of(&base, &recent);
+    let why = d.not_included.iter().find(|n| n.path.ends_with("DiagOutputDir")).map(|n| n.why_not.clone());
+    guard_assert!(
+        "older-than",
+        d.plan.items.is_empty() && matches!(why.as_deref(), Some([WhyNot::ConditionNotMet { .. }])),
+        "a folder with a file changed recently is not offered: {:#?} {:#?}",
+        d.plan.items,
+        why
+    );
+    // The same folder is offered once the recent file is as old as the rest.
+    touch(&recent.join("logs").join("deep").join("trace.etl"), std::time::SystemTime::now());
+    let d = draft_of(&base, &recent);
+    assert_eq!(d.plan.items.len(), 1, "{:#?}", d.not_included);
+    wdc_testkit::remove_tree(&base);
+}
+
+/// A link inside the folder is not followed: its target's recent content does not count.
+#[cfg(unix)]
+#[test]
+fn the_age_walk_does_not_follow_links() {
+    let base = fresh_dir("temp-link");
+    let t = temp_dir(&base);
+    let outside = base.join("outside");
+    write(&outside.join("busy.log"), 8192);
+    touch(&outside.join("busy.log"), std::time::SystemTime::now() + std::time::Duration::from_secs(3 * 86_400));
+    let item = t.join("with-link");
+    write(&item.join("a.tmp"), 8192);
+    std::os::unix::fs::symlink(&outside, item.join("to-outside")).unwrap();
+    let d = draft_of(&base, &item);
+    assert_eq!(d.plan.items.len(), 1, "the link's target is not walked: {:#?}", d.not_included);
+    wdc_testkit::remove_tree(&base);
+}

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::explain::{explain, WhyNot};
+use crate::fsops::{Holder, HolderProbe};
 use crate::rules::{canon, glob, native, Action, Class, Context, Origin, RuleSet};
 
 /// Version of the plan file format.
@@ -194,6 +195,9 @@ pub struct DraftOptions {
     pub classes: Vec<Class>,
     /// Only these rule ids (empty: all).
     pub rules: Vec<String>,
+    /// Finds who holds an item open: the Restart Manager on Windows, nobody elsewhere. A test
+    /// passes its own.
+    pub holders: HolderProbe,
 }
 
 /// A candidate that is not in the plan, with why.
@@ -254,6 +258,26 @@ fn rel(item: &str, path: &str) -> String {
     }
 }
 
+/// Why an actionable item is left out of the plan for its size, if it is. The incomplete reason
+/// is checked first: an item that could not be fully read has an unknown size, and "frees nothing"
+/// would claim a size that is not known.
+#[allow(unused_variables)]
+pub fn left_out_for_size(complete: bool, expected_freed_bytes: u64) -> Option<WhyNot> {
+    // An incomplete size is not a size the person can approve.
+    // GUARD-BEGIN(plan-complete)
+    if !complete {
+        return Some(WhyNot::NotFullyReadable);
+    }
+    // GUARD-END(plan-complete)
+    // An item that frees nothing still costs a proof of presence and quarantine churn.
+    // GUARD-BEGIN(plan-nothing)
+    if expected_freed_bytes == 0 {
+        return Some(WhyNot::NothingToFree);
+    }
+    // GUARD-END(plan-nothing)
+    None
+}
+
 /// Drafts a plan: every eligible item, explained. Reads only; writes nothing.
 pub fn draft(opts: &DraftOptions, rules: &RuleSet, ctx: &Context, data_dir: Option<&str>, now_secs: u64) -> Draft {
     let mut candidates: Vec<String> = Vec::new();
@@ -305,8 +329,23 @@ pub fn draft(opts: &DraftOptions, rules: &RuleSet, ctx: &Context, data_dir: Opti
             not_included.push(NotIncluded { path: e.item.clone(), rule_id, why_not: e.why_not.clone() });
             continue;
         }
+        if let Some(why) = left_out_for_size(e.complete, e.expected_freed_bytes) {
+            not_included.push(NotIncluded { path: e.item.clone(), rule_id, why_not: vec![why] });
+            continue;
+        }
         let r = e.rule.as_ref().expect("an actionable item has a rule");
         let item_path = e.final_path.clone().unwrap_or_else(|| e.item.clone());
+        // Renaming a folder fails while a file under it is open: leave out what another program
+        // holds. A probe that fails says nothing and keeps the item (apply still fails closed).
+        #[allow(unused_mut, unused_assignments)]
+        let mut held: Vec<Holder> = Vec::new();
+        // GUARD-BEGIN(plan-held)
+        held = opts.holders.probe(&native(&item_path)).unwrap_or_default();
+        // GUARD-END(plan-held)
+        if !held.is_empty() {
+            not_included.push(NotIncluded { path: e.item.clone(), rule_id, why_not: vec![WhyNot::HeldOpen { holders: held }] });
+            continue;
+        }
         let Some(file_id) = crate::fsops::file_id(&native(&item_path)) else {
             not_included.push(NotIncluded { path: e.item.clone(), rule_id, why_not: vec![WhyNot::Missing] });
             continue;

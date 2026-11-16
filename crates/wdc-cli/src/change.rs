@@ -85,7 +85,7 @@ fn print_draft(lang: Lang, d: &Draft, file: &Path) {
             println!("  {}  [{}] {}", n.path, n.rule_id.as_deref().unwrap_or("-"), why.join("; "));
         }
         if d.not_included.len() > 30 {
-            println!("{}", lang.fmt(Msg::CliDiffMore, &[("n", &(d.not_included.len() - 30).to_string())]));
+            println!("{}", lang.fmt(Msg::CliPlanLeftOutMore, &[("n", &(d.not_included.len() - 30).to_string())]));
         }
     }
     println!("\n{}", lang.fmt(Msg::CliPlanSaved, &[("path", &file.to_string_lossy())]));
@@ -193,25 +193,45 @@ fn show_command(args: &[String], lang: Lang, data_dir: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Free space around a purge: what was measured against what was expected.
 fn print_volumes(lang: Lang, volumes: &[VolumeMeasure]) {
     for v in volumes {
-        let (Some(b), Some(a)) = (v.free_before, v.free_after) else { continue };
-        let delta = a as i64 - b as i64;
-        let measured = if delta < 0 { format!("-{}", fmt::bytes(delta.unsigned_abs())) } else { format!("+{}", fmt::bytes(delta as u64)) };
-        println!(
-            "{}",
-            lang.fmt(
-                Msg::CliFreeSpace,
-                &[
-                    ("volume", &v.volume),
-                    ("before", &fmt::bytes(b)),
-                    ("after", &fmt::bytes(a)),
-                    ("measured", &measured),
-                    ("expected", &fmt::bytes(v.expected_freed_bytes)),
-                ]
-            )
-        );
+        print_volume(lang, v, Msg::CliFreeSpace, v.expected_freed_bytes);
     }
+}
+
+/// Free space around the moves of an apply. A move frees nothing, so the line says the items
+/// are in quarantine and what a purge is expected to return on that volume.
+fn print_moved_volumes(lang: Lang, report: &wdc_core::apply::ApplyReport) {
+    for v in &report.volumes {
+        let expected: u64 = report
+            .items
+            .iter()
+            .filter_map(|i| i.moved.as_ref())
+            .filter(|e| wdc_core::fsops::volume_root(&wdc_core::rules::native(&e.original)).is_some_and(|r| r.eq_ignore_ascii_case(&v.volume)))
+            .map(|e| e.expected_freed_bytes)
+            .sum();
+        print_volume(lang, v, Msg::CliFreeSpaceMoved, expected);
+    }
+}
+
+fn print_volume(lang: Lang, v: &VolumeMeasure, msg: Msg, expected: u64) {
+    let (Some(b), Some(a)) = (v.free_before, v.free_after) else { return };
+    let delta = a as i64 - b as i64;
+    let measured = if delta < 0 { format!("-{}", fmt::bytes(delta.unsigned_abs())) } else { format!("+{}", fmt::bytes(delta as u64)) };
+    println!(
+        "{}",
+        lang.fmt(
+            msg,
+            &[
+                ("volume", &v.volume),
+                ("before", &fmt::bytes(b)),
+                ("after", &fmt::bytes(a)),
+                ("measured", &measured),
+                ("expected", &fmt::bytes(expected)),
+            ]
+        )
+    );
 }
 
 fn proof_or_refuse(lang: Lang, json: bool, what: &str) -> Result<wdc_core::presence::Proof, ExitCode> {
@@ -291,7 +311,9 @@ pub fn apply_command(args: &[String], lang: Lang) -> ExitCode {
             println!("  {}", lang.fmt(Msg::CliSkipped, &[("path", &it.path), ("why", &s.text(lang))]));
         }
     }
-    print_volumes(lang, &report.volumes);
+    if report.moved > 0 {
+        print_moved_volumes(lang, &report);
+    }
     if let Some(p) = &report.purge {
         print_purge(lang, p);
     } else if report.moved > 0 {

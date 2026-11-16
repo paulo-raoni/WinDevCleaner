@@ -123,6 +123,9 @@ pub struct Rule {
     pub evidence_pt_br: String,
     /// Where the evidence comes from: documentation, an observed case with its date, or a check.
     pub source: String,
+    /// `source` in pt-BR; when empty (an older local rule file), `source` is shown.
+    #[serde(default)]
+    pub source_pt_br: String,
     pub cost: String,
     pub cost_pt_br: String,
     #[serde(default)]
@@ -149,6 +152,12 @@ impl Rule {
         match lang {
             Lang::En => &self.evidence,
             Lang::PtBr => &self.evidence_pt_br,
+        }
+    }
+    pub fn source(&self, lang: Lang) -> &str {
+        match lang {
+            Lang::PtBr if !self.source_pt_br.trim().is_empty() => &self.source_pt_br,
+            _ => &self.source,
         }
     }
     pub fn cost(&self, lang: Lang) -> &str {
@@ -548,6 +557,35 @@ fn ver(v: (u32, u32)) -> String {
     format!("{}.{:02}", v.0, v.1)
 }
 
+/// When the item last changed: a file's own modified time; for a folder, the newest modified
+/// time of the folder and of anything inside it. The walk never follows a link (a link counts
+/// by its own time). It stops as soon as it meets a time within `min_age_secs` of `now`: the
+/// answer is then "too recent" whatever else is inside. `None` when anything cannot be read,
+/// so the condition is not met (fail closed).
+fn newest_modified(path: &Path, now: SystemTime, min_age_secs: u64) -> Option<SystemTime> {
+    let own = std::fs::symlink_metadata(path).ok()?;
+    let mut newest = own.modified().ok()?;
+    if !own.is_dir() {
+        return Some(newest);
+    }
+    let recent = |t: SystemTime| now.duration_since(t).map(|d| d.as_secs()).unwrap_or(0) < min_age_secs;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if recent(newest) {
+            return Some(newest);
+        }
+        for e in std::fs::read_dir(&dir).ok()? {
+            let e = e.ok()?;
+            let meta = e.metadata().ok()?;
+            newest = newest.max(meta.modified().ok()?);
+            if meta.is_dir() {
+                stack.push(e.path());
+            }
+        }
+    }
+    Some(newest)
+}
+
 #[allow(unused_mut, unused_assignments)]
 fn eval(c: &Condition, item: &str, ctx: &Context) -> CondResult {
     let name = last_name(item);
@@ -567,8 +605,8 @@ fn eval(c: &Condition, item: &str, ctx: &Context) -> CondResult {
                 }
             }
         },
-        Condition::OlderThan { days } => match std::fs::symlink_metadata(native(item)).and_then(|m| m.modified()) {
-            Ok(t) => {
+        Condition::OlderThan { days } => match newest_modified(&native(item), ctx.now, *days as u64 * 86_400) {
+            Some(t) => {
                 let age = ctx.now.duration_since(t).map(|d| d.as_secs()).unwrap_or(0);
                 let mut ok = true;
                 // GUARD-BEGIN(older-than)
@@ -576,7 +614,7 @@ fn eval(c: &Condition, item: &str, ctx: &Context) -> CondResult {
                 // GUARD-END(older-than)
                 (ok, Found::Age { days: age / 86_400, needs: *days })
             }
-            Err(_) => (false, Found::NoDate),
+            None => (false, Found::NoDate),
         },
         Condition::ListedInFile { file, format } => match ctx.expand(file) {
             None => (false, Found::VariableMissing { file: file.clone() }),
@@ -728,10 +766,28 @@ mod tests {
             }
             assert_eq!(r.instructions.is_some(), r.instructions_pt_br.is_some(), "{}", r.id);
             assert!(!r.source.is_empty() && !r.last_verified.is_empty(), "{}", r.id);
+            assert!(!r.source_pt_br.trim().is_empty(), "{} lacks a pt-BR source", r.id);
             if r.class == Class::NeverTouch || r.class == Class::AppManaged {
                 assert_ne!(r.action, Action::Quarantine, "{} can never be quarantined", r.id);
             }
         }
+    }
+
+    #[test]
+    fn built_in_rule_files_name_no_person_and_no_private_machine() {
+        // Whole words, any case: "abandono" is not "dono". Covers every field of every rule, both
+        // languages, and the comments, because the whole file text is read.
+        let words = regex_lite::Regex::new(r"(?i)\b(owner|dono|paulo|raoni)\b").unwrap();
+        let mut found = Vec::new();
+        for (name, text) in BUILT_IN {
+            for (n, line) in text.lines().enumerate() {
+                if let Some(m) = words.find(line) {
+                    found.push(format!("{name}:{}: {}", n + 1, m.as_str()));
+                }
+            }
+        }
+        assert!(found.is_empty(), "rule texts must be neutral: {found:?}");
+        assert!(words.is_match("the Owner's machine") && words.is_match("DONO") && !words.is_match("abandono"));
     }
 
     #[test]

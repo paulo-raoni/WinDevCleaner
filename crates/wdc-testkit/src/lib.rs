@@ -4,10 +4,12 @@
 //! expected values are read through APIs other than the scanner's directory enumeration, so a
 //! test never checks the scanner against itself.
 
+mod bin_search;
 #[cfg(windows)]
 mod change;
 #[cfg(windows)]
 mod imp;
+pub use bin_search::find_in_ancestors;
 #[cfg(windows)]
 pub use change::*;
 #[cfg(windows)]

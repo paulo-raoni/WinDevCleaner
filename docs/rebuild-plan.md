@@ -265,7 +265,9 @@ step in it.
 - **Connection.** The agent's configuration starts `wdc mcp` (stdio, the transport every MCP client
   supports). If the app is open, `wdc mcp` connects to it through a local named pipe that only the
   same Windows user can open, and every call goes through the app. If the app is closed, `wdc mcp`
-  runs the engine headless; with `--show` it opens the app first.
+  runs the engine headless; with `--show` it opens the app first. A headless server looks for the app
+  before each call and switches to it when the app answers (never back to headless; a disconnected
+  agent never falls back), and every tool result carries `app` (`connected`, `headless` or `blocked`).
 - **What the app shows.** A banner "Agent connected: <client name>" (the name the MCP client
   reports, such as Claude Code or Codex), and a live activity panel: each call as it happens
   ("scanning `%LOCALAPPDATA%`", "explaining `.vscode\extensions\...`", "plan drafted: 12 items,

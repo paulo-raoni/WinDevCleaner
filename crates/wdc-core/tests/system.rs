@@ -43,6 +43,10 @@ fn paging_swap_and_hibernation_files_match_the_volume_listing() {
                     guard_assert_eq!("system-file-size", i.bytes, Some(len), "{path}");
                 }
                 (None, None) => {}
+                // Hibernation off: the system drive reports the file absent, with the reason.
+                (Some(i), None) if kind == Kind::HibernationFile && i.status == Status::Absent => {
+                    assert_eq!(i.note.as_deref(), Some("hibernation is off"));
+                }
                 (o, t) => panic!("{path}: engine {o:?}, PowerShell {t:?}"),
             }
         }

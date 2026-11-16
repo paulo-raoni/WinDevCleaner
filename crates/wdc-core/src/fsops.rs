@@ -20,6 +20,116 @@ pub struct OpenItem {
     pub is_link: bool,
 }
 
+/// A program that has the item, or a file inside it, open (found through the Restart Manager).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Holder {
+    pub pid: u32,
+    /// The name Windows shows for the program ("NVIDIA Container").
+    pub name: String,
+}
+
+/// The holder names for a sentence: each distinct name once, in order, joined by commas.
+pub fn holder_names(holders: &[Holder]) -> String {
+    let mut seen: Vec<&str> = Vec::new();
+    for h in holders {
+        if !seen.contains(&h.name.as_str()) {
+            seen.push(&h.name);
+        }
+    }
+    seen.join(", ")
+}
+
+/// How many distinct names `holder_names` lists.
+pub fn holder_name_count(holders: &[Holder]) -> usize {
+    let mut seen: Vec<&str> = Vec::new();
+    for h in holders {
+        if !seen.contains(&h.name.as_str()) {
+            seen.push(&h.name);
+        }
+    }
+    seen.len()
+}
+
+/// Files registered with the Restart Manager for a folder, at most. A probe is a handle
+/// enumeration of the whole system plus one lookup per file, so its cost grows with this number;
+/// 4,096 keeps one probe to a fraction of a second on a cache with tens of thousands of files.
+/// Past the cap a held folder may still reach a plan: apply fails closed and names the holders.
+pub const PROBE_FILE_CAP: usize = 4_096;
+
+/// Looks for the programs that hold an item open. `None`: the probe itself failed (the answer
+/// is unknown, not "nobody"). Read-only: it never closes, signals or kills anything.
+#[derive(Clone)]
+pub struct HolderProbe(std::sync::Arc<ProbeFn>);
+
+type ProbeFn = dyn Fn(&Path) -> Option<Vec<Holder>> + Send + Sync;
+
+impl HolderProbe {
+    pub fn new(f: impl Fn(&Path) -> Option<Vec<Holder>> + Send + Sync + 'static) -> HolderProbe {
+        HolderProbe(std::sync::Arc::new(f))
+    }
+
+    pub fn probe(&self, path: &Path) -> Option<Vec<Holder>> {
+        (self.0)(path)
+    }
+}
+
+impl std::fmt::Debug for HolderProbe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HolderProbe")
+    }
+}
+
+impl Default for HolderProbe {
+    /// The Restart Manager on Windows; "no holders" elsewhere.
+    fn default() -> HolderProbe {
+        HolderProbe::new(system_holders)
+    }
+}
+
+/// What to register with the Restart Manager for an item: the item itself when it is a regular
+/// file; for a folder, only its files (the Restart Manager may reject a directory, and then no
+/// folder could ever be probed), breadth first, links never followed, at most `cap` files.
+/// Unreadable parts are skipped: the probe is best effort.
+pub fn probe_files(root: &Path, cap: usize) -> Vec<std::path::PathBuf> {
+    let Ok(meta) = std::fs::symlink_metadata(root) else { return Vec::new() };
+    if meta.is_file() {
+        return vec![root.to_path_buf()];
+    }
+    let mut out = Vec::new();
+    if !meta.is_dir() {
+        return out;
+    }
+    let mut files = 0usize;
+    let mut queue = std::collections::VecDeque::from([root.to_path_buf()]);
+    while let Some(dir) = queue.pop_front() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            match e.file_type() {
+                Ok(t) if t.is_dir() => queue.push_back(e.path()),
+                Ok(t) if t.is_file() => {
+                    if files >= cap {
+                        return out;
+                    }
+                    files += 1;
+                    out.push(e.path());
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+#[cfg(windows)]
+fn system_holders(path: &Path) -> Option<Vec<Holder>> {
+    crate::win::restart_manager_holders(&probe_files(path, PROBE_FILE_CAP))
+}
+
+#[cfg(not(windows))]
+fn system_holders(_path: &Path) -> Option<Vec<Holder>> {
+    Some(Vec::new())
+}
+
 /// Why an operation failed, with the Windows error code.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct OpError {
@@ -38,6 +148,11 @@ impl OpError {
             _ => "other",
         };
         OpError { code, kind }
+    }
+
+    /// Access denied or a sharing violation: what a program holding the item open causes.
+    pub fn may_be_held(&self) -> bool {
+        matches!(self.kind, "access-denied" | "in-use")
     }
 }
 
